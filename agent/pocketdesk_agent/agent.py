@@ -147,6 +147,11 @@ class Agent:
         elif t == "bye":
             if self.session and self.session.device_id == m.get("device_id"):
                 await self.end_session("remote hangup")
+        elif t == "device_gone":
+            # the phone's link to the server closed. A relay session depends on it, so end it now; a direct WebRTC session
+            # keeps running (it has its own connection) and is ended by its own state handling if the phone is really gone.
+            if isinstance(self.session, RelaySession) and self.session.device_id == m.get("device_id"):
+                await self.end_session("phone disconnected")
         elif t == "device_revoked":
             did = m.get("device_id")
             self.cfg.remove_device(did)

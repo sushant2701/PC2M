@@ -1,3 +1,4 @@
+import asyncio
 import json
 import secrets
 import time
@@ -33,10 +34,17 @@ async def test_real_ntfy_roundtrip(tmp_path):
         await publish(cfg, "https://roundtrip.serveousercontent.com")
     except Exception as e:  # network unavailable
         pytest.skip(f"ntfy.sh unreachable: {e}")
+    msgs = []
     async with httpx.AsyncClient(timeout=15) as c:
-        r = await c.get(f"{NTFY}/{cfg['ntfy_topic']}/json?poll=1&since=all")
-    events = [json.loads(l) for l in r.text.strip().splitlines()]
-    msg = json.loads([e for e in events if e["event"] == "message"][-1]["message"])
+        for _ in range(10):  # the public service can take a moment before a new message is readable
+            r = await c.get(f"{NTFY}/{cfg['ntfy_topic']}/json?poll=1&since=all")
+            msgs = [json.loads(l) for l in r.text.strip().splitlines() if l.strip()]
+            msgs = [e for e in msgs if e.get("event") == "message"]
+            if msgs:
+                break
+            await asyncio.sleep(1.5)
+    assert msgs, "announcement never became readable on ntfy.sh"
+    msg = json.loads(msgs[-1]["message"])
     assert msg["u"] == "https://roundtrip.serveousercontent.com"
     assert crypto.verify(crypto.addr_mac(key, msg["u"], msg["ts"]), msg["m"]["d_t"])
     assert abs(time.time() - msg["ts"]) < 60

@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from pocketdesk_agent import crypto
 from pocketdesk_agent.inputctl import InputController, norm_to_pixel, pixel_to_abs, pixel_to_norm, KEYS
@@ -83,6 +85,54 @@ def test_release_all_on_disconnect():
     assert not r.down_btns and not r.down_keys
 
 
+@pytest.mark.asyncio
+async def test_rate_limit_and_signal_loss_release():
+    import time
+    from pocketdesk_agent import session as S
+
+    class FakeSrc:
+        monitors = [MON]
+        virtual = VIRT
+        monitor = 0
+        backend = "x"
+        def current_monitor(self): return MON
+        def configure(self, **k): pass
+
+    class H(S.ControlHandler):
+        device_name = "t"
+        closed = False
+        def __init__(self):
+            self._init_control(FakeSrc())
+            self.input._send = lambda *a: True
+            self.sent = []
+        def _send(self, o): self.sent.append(o)
+        async def close(self, reason=""): self.closed = True
+
+    h = H()
+    # a burst far above the limit is mostly dropped, not executed
+    for _ in range(5000):
+        h._on_message('{"t":"mr","dx":1,"dy":1}')
+    await asyncio.sleep(0)
+    assert h.closed, "sustained flood must end the session"
+    # dead-man: held key is released when the signal goes quiet
+    h2 = H()
+    h2._on_message('{"t":"k","c":"ControlLeft","d":true}')
+    assert h2.input.down_keys == {"ControlLeft"}
+    h2.last_rx = time.monotonic() - 10
+    h2._guard_signal_loss()
+    assert not h2.input.down_keys
+    # unknown / malformed messages count as bad and end the session after BAD_LIMIT
+    h3 = H()
+    for _ in range(S.BAD_LIMIT + 2):
+        h3._on_message('{"t":"nope"}')
+    await asyncio.sleep(0)
+    assert h3.closed
+    # after close nothing is executed
+    h3.input.down_keys.clear()
+    h3._on_message('{"t":"k","c":"KeyA","d":true}')
+    assert not h3.input.down_keys
+
+
 def test_lock_detection_and_awake_do_not_crash():
     from pocketdesk_agent.system import is_locked, set_awake
     assert is_locked() is False  # tests run in an unlocked interactive session
@@ -92,7 +142,7 @@ def test_lock_detection_and_awake_do_not_crash():
 
 def test_text_emits_unicode_pairs_and_keytable():
     r = Rec()
-    r.handle({"t": "tx", "s": "a😀"})
+    r.handle({"t": "tx", "s": "a\U0001F600"})
     assert len(r.calls) == 2 * 3  # a + surrogate pair, down+up each
     for k in ("KeyA", "Enter", "ControlLeft", "F12", "ArrowUp", "MetaLeft", "Digit9"):
         assert k in KEYS

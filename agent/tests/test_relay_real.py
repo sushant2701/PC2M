@@ -14,6 +14,64 @@ from test_integration_real import server, wait_for, cursor_reaches, cursor, user
 
 
 @pytest.mark.asyncio
+async def test_closing_app_stops_everything_and_flood_is_blocked(server, tmp_path):
+    """When the app is closed the PC must go completely quiet: session ends at once, capture stops, nothing is held down."""
+    cfg = Config(tmp_path / "agent.bin")
+    cfg["server_url"] = server
+    agent = Agent(cfg)
+    run = asyncio.ensure_future(agent.run())
+    phone = DevicePeer(server)
+    saved = cursor()
+    try:
+        assert await wait_for(lambda: agent.connected)
+        await phone.pair(await agent.start_pairing())
+        assert await wait_for(lambda: phone.device_id in cfg["devices"])
+        await phone.connect_signaling()
+        assert (await phone.start_relay())["type"] == "relay_ok"
+        assert await wait_for(lambda: len(phone.relay_frames) >= 1, 20)
+        assert agent.source is not None
+        phone.send({"t": "k", "c": "ShiftLeft", "d": True})
+        assert await wait_for(lambda: user32.GetAsyncKeyState(0x10) & 0x8000, 5)
+        # app killed abruptly (no goodbye message): socket just dies
+        await phone.ws.close()
+        assert await wait_for(lambda: agent.session is None, 5), "session still alive after the app closed"
+        assert agent.source is None, "screen capture still running with nobody connected"
+        assert await wait_for(lambda: not (user32.GetAsyncKeyState(0x10) & 0x8000), 3), "key left pressed"
+        # nobody connected: the stale phone cannot start input any more
+        assert agent.session is None
+    finally:
+        user32.keybd_event(0xA0, 0, 2, 0)
+        user32.SetCursorPos(*saved)
+        await agent.stop()
+        run.cancel()
+
+
+@pytest.mark.asyncio
+async def test_flood_and_garbage_end_the_session(server, tmp_path):
+    cfg = Config(tmp_path / "agent.bin")
+    cfg["server_url"] = server
+    agent = Agent(cfg)
+    run = asyncio.ensure_future(agent.run())
+    phone = DevicePeer(server)
+    saved = cursor()
+    try:
+        assert await wait_for(lambda: agent.connected)
+        await phone.pair(await agent.start_pairing())
+        await phone.connect_signaling()
+        assert (await phone.start_relay())["type"] == "relay_ok"
+        assert await wait_for(lambda: agent.session is not None)
+        for i in range(60):  # malformed / unknown messages: must be rejected and eventually end the session
+            phone.send({"t": "definitely-not-a-command", "i": i})
+            phone.send({"t": "mm", "x": "bad", "y": None})
+        assert await wait_for(lambda: agent.session is None, 10), "garbage did not end the session"
+    finally:
+        user32.SetCursorPos(*saved)
+        await phone.close()
+        await agent.stop()
+        run.cancel()
+
+
+@pytest.mark.asyncio
 async def test_relay_session(server, tmp_path):
     cfg = Config(tmp_path / "agent.bin")
     cfg["server_url"] = server

@@ -329,6 +329,14 @@ def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=
                 table = agents_ws if role == "agent" else devices_ws
                 if table.get(ident) is ws:
                     del table[ident]
+                if role == "device" and ident not in devices_ws:  # phone/app closed or lost (not merely replaced by a newer connection)
+                    d = db.get_device(ident)
+                    aws = agents_ws.get(d["agent_id"]) if d else None
+                    if aws:
+                        try:
+                            await aws.send_text(json.dumps({"type": "device_gone", "device_id": ident}))
+                        except Exception:
+                            pass
                 if role == "agent":
                     for did, dws in list(devices_ws.items()):
                         d = db.get_device(did)

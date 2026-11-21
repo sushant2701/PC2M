@@ -19,7 +19,12 @@ vpx.MAX_BITRATE = 4_000_000
 log = logging.getLogger("pocketdesk.session")
 sec_log = logging.getLogger("pocketdesk.security")
 MAX_CLIP = 50_000
-IDLE_TIMEOUT = 30.0
+IDLE_TIMEOUT = 15.0        # no message at all from the phone (it pings every 2 s) -> session is closed
+DEADMAN = 4.0              # no signal for this long -> release every held key/mouse button immediately
+RATE_PER_SEC, BURST = 400, 800   # control messages/second the PC will act on (the app sends <= ~70/s)
+FLOOD_LIMIT = 300          # dropped messages within FLOOD_WINDOW -> session is terminated
+FLOOD_WINDOW = 10.0
+BAD_LIMIT = 30             # malformed/rejected messages within 60 s -> session is terminated
 QUALITY_PRESETS = {"low": (960, 12), "medium": (1280, 20), "high": (1920, 30)}
 RELAY_PRESETS = {"low": (960, 6, 45), "medium": (1280, 10, 55), "high": (1600, 15, 65)}  # width, fps, jpeg quality
 
@@ -40,6 +45,39 @@ class ControlHandler:
         self.input = InputController(source.current_monitor, lambda: source.virtual)
         self.last_rx = time.monotonic()
         self._locked = None
+        self._tokens, self._tb_t = float(BURST), time.monotonic()
+        self._drops, self._drop_t0 = 0, time.monotonic()
+        self._bad = []
+
+    def _guard_signal_loss(self):
+        """Dead-man switch: if the phone goes silent, nothing may stay pressed on the PC."""
+        if time.monotonic() - self.last_rx > DEADMAN and (self.input.down_keys or self.input.down_btns):
+            log.warning("signal lost: releasing held keys/buttons")
+            self.input.release_all()
+
+    def _allow(self) -> bool:
+        """Token-bucket limiter + flood detection: the PC never acts on more than RATE_PER_SEC messages/second."""
+        now = time.monotonic()
+        self._tokens = min(float(BURST), self._tokens + (now - self._tb_t) * RATE_PER_SEC)
+        self._tb_t = now
+        if self._tokens >= 1:
+            self._tokens -= 1
+            return True
+        if now - self._drop_t0 > FLOOD_WINDOW:
+            self._drops, self._drop_t0 = 0, now
+        self._drops += 1
+        if self._drops > FLOOD_LIMIT:
+            sec_log.warning("control flood from %s: ending session", self.device_name)
+            asyncio.ensure_future(self.close("flood protection"))
+        return False
+
+    def _note_bad(self, why):
+        now = time.monotonic()
+        self._bad = [t for t in self._bad if now - t < 60] + [now]
+        log.warning("rejected control message: %s", why)
+        if len(self._bad) > BAD_LIMIT:
+            sec_log.warning("too many invalid messages from %s: ending session", self.device_name)
+            asyncio.ensure_future(self.close("invalid input protection"))
 
     def _send(self, obj):  # implemented by subclasses
         raise NotImplementedError
@@ -57,11 +95,17 @@ class ControlHandler:
                     "monitor": self.src.monitor, "w": m["width"], "h": m["height"], "backend": self.src.backend})
 
     def _on_message(self, raw):
+        if getattr(self, "closed", False):
+            return  # session over: never act on anything
+        if isinstance(raw, (str, bytes)) and len(raw) > 70_000:
+            return self._note_bad("oversized message")
+        if not self._allow():
+            return
         self.last_rx = time.monotonic()
         try:
             m = json.loads(raw)
             if not isinstance(m, dict):
-                return
+                return self._note_bad("not an object")
             t = m.get("t")
             if t == "ping":
                 self._send({"t": "pong", "n": m.get("n")})
@@ -79,10 +123,10 @@ class ControlHandler:
             elif t == "lock":  # lock workstation (non-destructive); phone UI asks for confirmation first
                 sec_log.info("remote lock requested by %s", self.device_name)
                 lock_workstation()
-            else:
-                self.input.handle(m)
+            elif not self.input.handle(m):
+                self._note_bad(f"unknown message type {str(t)[:20]!r}")
         except (ValueError, KeyError, TypeError) as e:
-            log.warning("rejected control message: %s", e)
+            self._note_bad(e)
 
     def _apply_cfg(self, m):
         mw, fps = m.get("maxw"), m.get("fps")
@@ -159,6 +203,7 @@ class Session(ControlHandler):
         while not self.closed:
             await asyncio.sleep(1 / 20)
             n += 1
+            self._guard_signal_loss()
             try:
                 cx, cy = self.input.cursor_norm()
                 self._send({"t": "cur", "x": round(cx, 4), "y": round(cy, 4)})
@@ -249,6 +294,8 @@ class RelaySession(ControlHandler):
         return pt[0], pt[1:]
 
     def on_data(self, data: bytes):
+        if self.closed:
+            return
         try:
             typ, payload = self._open(data)
         except Exception as e:  # bad tag / replay: drop silently, log
@@ -331,6 +378,7 @@ class RelaySession(ControlHandler):
             while not self.closed:
                 await asyncio.sleep(1 / 12)
                 n += 1
+                self._guard_signal_loss()
                 cx, cy = self.input.cursor_norm()
                 self._send({"t": "cur", "x": round(cx, 4), "y": round(cy, 4)})
                 if n % 6 == 0:
