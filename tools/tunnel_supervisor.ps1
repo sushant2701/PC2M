@@ -13,10 +13,11 @@ while ($true) {
   # try the reserved name first; serveo falls back to a random address if the key is not registered yet
   $p = Start-Process ssh -PassThru -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError (Join-Path $env:TEMP "pd_tunnel.err") `
         -ArgumentList '-i', $key, '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ExitOnForwardFailure=yes', '-R', "${name}:80:127.0.0.1:8080", 'serveo.net'
-  for ($i = 0; $i -lt 30 -and -not $p.HasExited; $i++) {
-    Start-Sleep 1
-    if (Test-Path $out) { $m = [regex]::Match((Get-Content $out -Raw), 'https://\S+serveousercontent\.com'); if ($m.Success) { $m.Value | Set-Content $urlFile -NoNewline; break } }
+  $last = ""
+  while (-not $p.HasExited) {      # keep the address file in sync with whatever this ssh session printed
+    Start-Sleep 2
+    if (Test-Path $out) { $m = [regex]::Match((Get-Content $out -Raw), 'https://\S+serveousercontent\.com'); if ($m.Success -and $m.Value -ne $last) { $last = $m.Value; $m.Value | Set-Content $urlFile -NoNewline } }
   }
-  $p.WaitForExit()      # blocks while the tunnel is up; loop restarts it when it drops
+  Remove-Item $urlFile -ErrorAction SilentlyContinue   # tunnel is down: no valid address
   Start-Sleep 3
 }
