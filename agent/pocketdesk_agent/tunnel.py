@@ -72,6 +72,7 @@ class Tunnel:
             log.error("ssh not found; tunnel disabled")
             return
         asyncio.ensure_future(self._heartbeat())
+        asyncio.ensure_future(self._watchdog())
         while not self._stop:
             try:
                 self._proc = await asyncio.create_subprocess_exec(
@@ -116,6 +117,32 @@ class Tunnel:
             await asyncio.sleep(20 * 60)
             if self.url:
                 await self._announce()
+
+    async def _probe(self) -> bool:
+        """Is the public address actually reaching this PC's server? (The free tunnel can stay 'connected' yet stop forwarding.)"""
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get(self.url + "/healthz")
+            return r.status_code == 200 and '"ok"' in r.text
+        except Exception:
+            return False
+
+    def _kill(self):
+        if self._proc and self._proc.returncode is None:
+            self._proc.terminate()
+
+    async def _watchdog(self, interval=25, max_fails=2):
+        fails = 0
+        while not self._stop:
+            await asyncio.sleep(interval)
+            if not self.url:
+                fails = 0
+                continue
+            fails = 0 if await self._probe() else fails + 1
+            if fails >= max_fails:
+                log.warning("tunnel address stopped working; restarting the tunnel")
+                fails = 0
+                self._kill()   # the run() loop starts a fresh tunnel, announces the new address to the phones
 
     async def stop(self):
         self._stop = True

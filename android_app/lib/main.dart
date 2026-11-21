@@ -215,7 +215,7 @@ class _ViewerState extends State<Viewer> {
           _checkUpdate();
         },
         onWebResourceError: (e) {
-          if (e.isForMainFrame ?? false) _fail(e.description);
+          if (e.isForMainFrame != false) _fail(e.description);
         },
         onHttpError: (e) {
           if ((e.response?.statusCode ?? 0) >= 500) _fail('Server returned ${e.response?.statusCode}');
@@ -235,10 +235,45 @@ class _ViewerState extends State<Viewer> {
       ctl.loadRequest(Uri.parse(pending));
       return;
     }
-    final d = pcs.isEmpty ? null : await discoverAddress(pcs); // follow the PC if its address changed
-    if (d != null) origin = Uri.parse(d).origin;
-    await prefs.setString('origin', origin);
-    ctl.loadRequest(Uri.parse(origin));
+    // Pick a working address BEFORE loading anything: the announced address (if the PC's address changed) or the saved one.
+    final d = pcs.isEmpty ? null : await discoverAddress(pcs);
+    for (final c in [if (d != null) Uri.parse(d).origin, origin]) {
+      if (await _healthy(c)) {
+        origin = c;
+        await prefs.setString('origin', origin);
+        _checkUpdate();
+        ctl.loadRequest(Uri.parse(origin));
+        _watch();
+        return;
+      }
+    }
+    _fail('Waiting for your PC…'); // keeps searching by itself and loads the page as soon as the PC answers
+  }
+
+  Future<bool> _healthy(String o) async {
+    try {
+      final r = await http.get(Uri.parse('$o/healthz')).timeout(const Duration(seconds: 8));
+      return r.statusCode == 200 && r.body.contains('ok');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  int _badChecks = 0;
+  Timer? watchTimer;
+
+  /// While connected: if the address stops answering (tunnel restarted), go back to searching for the PC.
+  void _watch() {
+    watchTimer?.cancel();
+    watchTimer = Timer.periodic(const Duration(seconds: 20), (_) async {
+      if (loadError != null) return;
+      if (await _healthy(origin)) {
+        _badChecks = 0;
+      } else if (++_badChecks >= 2) {
+        _badChecks = 0;
+        _fail('PC address changed or unreachable');
+      }
+    });
   }
 
   /// Restores the saved pairing into the page (needed whenever the address — and so the page origin — has changed).
@@ -264,16 +299,23 @@ class _ViewerState extends State<Viewer> {
   }
 
   Future<void> _checkAddress() async {
-    if (checkingAddr || pcs.isEmpty) return;
+    if (checkingAddr) return;
     checkingAddr = true;
     try {
-      final d = await discoverAddress(pcs);
-      if (d != null && Uri.parse(d).origin != origin) {
-        origin = Uri.parse(d).origin;
-        await prefs.setString('origin', origin);
-        ctl.loadRequest(Uri.parse(origin)); // new address: page reloads, pairing re-injected, session resumes
-      } else if (loadError != null) {
-        ctl.loadRequest(Uri.parse(origin));
+      final d = pcs.isEmpty ? null : await discoverAddress(pcs);
+      for (final c in [if (d != null) Uri.parse(d).origin, origin]) {
+        if (await _healthy(c)) {
+          final changed = c != origin;
+          origin = c;
+          await prefs.setString('origin', origin);
+          if (mounted) setState(() => loadError = null);
+          healTimer?.cancel();
+          healTimer = null;
+          ctl.loadRequest(Uri.parse(origin)); // page reloads, pairing is re-injected, the session resumes
+          _watch();
+          if (changed) _checkUpdate();
+          return;
+        }
       }
     } finally {
       checkingAddr = false;
@@ -309,6 +351,7 @@ class _ViewerState extends State<Viewer> {
   @override
   void dispose() {
     healTimer?.cancel();
+    watchTimer?.cancel();
     WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();

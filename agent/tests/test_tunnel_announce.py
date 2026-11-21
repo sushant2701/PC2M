@@ -24,6 +24,26 @@ def test_announcement_signed_per_device(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_watchdog_restarts_a_tunnel_that_stopped_forwarding(tmp_path):
+    from pocketdesk_agent.tunnel import Tunnel
+    cfg = Config(tmp_path / "c.bin")
+    t = Tunnel(cfg)
+    t.url = "https://dead.serveousercontent.com"
+    kills, results = [], iter([True, False, False, True, False, False])
+
+    async def probe():
+        return next(results)
+    t._probe = probe
+    t._kill = lambda: kills.append(1)
+    task = asyncio.ensure_future(t._watchdog(interval=0.01, max_fails=2))
+    await asyncio.sleep(0.3)
+    t._stop = True
+    task.cancel()
+    assert len(kills) >= 1, "unhealthy tunnel was not restarted"
+    assert len(kills) <= 2
+
+
+@pytest.mark.asyncio
 async def test_real_ntfy_roundtrip(tmp_path):
     """Uses the real public ntfy.sh service with a random throw-away topic (sends only a test URL)."""
     cfg = Config(tmp_path / "c.bin")
