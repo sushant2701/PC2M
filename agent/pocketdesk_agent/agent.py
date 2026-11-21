@@ -11,7 +11,8 @@ import websockets
 from . import crypto
 from .capture import ScreenSource, set_dpi_aware
 from .config import Config
-from .session import Session
+from .session import RelaySession, Session
+from .system import set_awake
 
 log = logging.getLogger("pocketdesk.agent")
 sec_log = logging.getLogger("pocketdesk.security")
@@ -83,6 +84,7 @@ class Agent:
     # ---------- main loop ----------
     async def run(self):
         set_dpi_aware()
+        set_awake(False)  # no sleep while the agent is running (display may still turn off)
         backoff = 1
         while not self._stop.is_set():
             try:
@@ -95,7 +97,10 @@ class Agent:
                     backoff = 1
                     self.emit("status", "online")
                     async for raw in ws:
-                        await self._on_signal(json.loads(raw))
+                        if isinstance(raw, bytes):
+                            self._on_binary(raw)
+                        else:
+                            await self._on_signal(json.loads(raw))
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -109,7 +114,7 @@ class Agent:
                 await asyncio.wait_for(self._stop.wait(), backoff)
             except asyncio.TimeoutError:
                 pass
-            backoff = min(60, backoff * 2)
+            backoff = min(10, backoff * 2)  # keep retrying quickly: the phone may be waiting
         await self.end_session("agent stopping")
 
     async def stop(self):
@@ -130,6 +135,8 @@ class Agent:
             await self._on_paired(m)
         elif t == "offer":
             await self._on_offer(m)
+        elif t == "relay_start":
+            await self._on_relay_start(m)
         elif t == "bye":
             if self.session and self.session.device_id == m.get("device_id"):
                 await self.end_session("remote hangup")
@@ -189,13 +196,59 @@ class Agent:
             await sess.close("setup failed")
             await self._send({"type": "error", "device_id": did, "session_id": sid, "error": "setup failed"})
             return
+        set_awake(True)
         sec_log.info("session started with %s (%s)", name, did)
         self.emit("session", {"active": True, "device": name})
         await self._send({"type": "answer", "device_id": did, "session_id": sid, "ts": ts, "sdp": answer,
                           "mac": crypto.answer_mac(key, sid, did, ts, answer)})
 
+    def _on_binary(self, data: bytes):
+        """Relay data from a phone: 18-byte device id prefix (added by the server) + encrypted frame."""
+        s = self.session
+        if isinstance(s, RelaySession) and data[:18].decode("ascii", "ignore") == s.device_id:
+            s.on_data(data[18:])
+
+    async def _on_relay_start(self, m):
+        did, sid = str(m.get("device_id")), str(m.get("session_id"))
+        key = self.cfg.device_key(did)
+        try:
+            ts = int(m["ts"])
+            if key is None:
+                raise ValueError("unknown device")
+            if abs(time.time() - ts) > TS_WINDOW:
+                raise ValueError("stale timestamp")
+            if (did, sid) in self._seen:
+                raise ValueError("replayed session id")
+            bytes.fromhex(sid)
+            if not crypto.verify(crypto.relay_mac(key, sid, did, ts), str(m.get("mac"))):
+                raise ValueError("bad MAC")
+        except (ValueError, KeyError, TypeError) as e:
+            sec_log.warning("relay request rejected from %s: %s", did, e)
+            await self._send({"type": "error", "device_id": did, "session_id": sid, "error": "rejected"})
+            return
+        self._seen.append((did, sid))
+        await self.end_session("replaced by new connection")
+        name = self.cfg["devices"][did]["name"]
+        if self.source is None:
+            self.source = ScreenSource(max_width=self.cfg["max_width"], fps=self.cfg["fps"])
+        self.source.start()
+
+        async def send_bytes(blob):
+            if self.ws:
+                await self.ws.send(did.encode("ascii") + blob)
+
+        sess = RelaySession(did, name, self.source, key, sid, send_bytes, self._session_ended)
+        self.session = sess
+        await self._send({"type": "relay_ok", "device_id": did, "session_id": sid, "ts": ts,
+                          "mac": crypto.relay_ok_mac(key, sid, did, ts)})
+        sess.start()
+        set_awake(True)
+        sec_log.info("relay session started with %s (%s)", name, did)
+        self.emit("session", {"active": True, "device": name})
+
     def _session_ended(self, sess, reason):
         if self.session is sess:
+            set_awake(False)
             self.session = None
             if self.source:
                 self.source.stop()

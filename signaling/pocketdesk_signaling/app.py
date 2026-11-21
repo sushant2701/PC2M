@@ -18,6 +18,7 @@ from .ratelimit import RateLimiter
 log = logging.getLogger("pocketdesk.signaling")
 LOOKUP_RE = re.compile(r"^[A-Z2-7]{6}$")
 MAX_WS_MSG = 64 * 1024
+MAX_BIN = 2 * 1024 * 1024
 PAIR_TTL = 300
 
 
@@ -98,6 +99,22 @@ def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=
                 raise HTTPException(429, "too many attempts")
             raise HTTPException(401, "invalid credentials")
         return d
+
+    web_dir = os.path.join(os.path.dirname(__file__), "web")
+
+    def _page(name, mime):
+        from fastapi.responses import FileResponse
+        return FileResponse(os.path.join(web_dir, name), media_type=mime,
+                            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                                     "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY"})
+
+    @app.get("/")
+    def web_index():
+        return _page("index.html", "text/html")
+
+    @app.get("/app.js")
+    def web_js():
+        return _page("app.js", "application/javascript")
 
     @app.get("/healthz")
     def healthz():
@@ -231,7 +248,28 @@ def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=
                         except Exception:
                             pass
             while True:
-                raw = await ws.receive_text()
+                frame = await ws.receive()
+                if frame["type"] == "websocket.disconnect":
+                    return
+                blob = frame.get("bytes")
+                if blob is not None:  # encrypted relay payload (opaque to the server)
+                    if len(blob) > MAX_BIN:
+                        await ws.close(code=1009)
+                        return
+                    if role == "device":
+                        if not db.auth_device(ident, secret):
+                            await ws.close(code=4403)
+                            return
+                        target = agents_ws.get(db.get_device(ident)["agent_id"])
+                        if target:
+                            await target.send_bytes(ident.encode("ascii") + blob)
+                    elif len(blob) > 18:
+                        did = blob[:18].decode("ascii", "ignore")
+                        d, tdev = db.get_device(did), devices_ws.get(did)
+                        if tdev and d and d["agent_id"] == ident and not d["revoked"]:
+                            await tdev.send_bytes(blob[18:])
+                    continue
+                raw = frame.get("text") or ""
                 if len(raw) > MAX_WS_MSG:
                     await ws.close(code=1009)
                     return
@@ -243,7 +281,7 @@ def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=
                         await ws.close(code=4403)
                         return
                     target = agents_ws.get(dev["agent_id"])
-                    if t in ("offer", "bye"):
+                    if t in ("offer", "bye", "relay_start"):
                         if not target:
                             await ws.send_text(json.dumps({"type": "agent_offline", "session_id": msg.get("session_id")}))
                             continue
@@ -253,7 +291,7 @@ def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=
                     elif t == "ping":
                         await ws.send_text(json.dumps({"type": "pong"}))
                 elif role == "agent":
-                    if t in ("answer", "bye", "error"):
+                    if t in ("answer", "bye", "error", "relay_ok"):
                         tdev = devices_ws.get(str(msg.get("device_id")))
                         d = db.get_device(str(msg.get("device_id")))
                         if tdev and d and d["agent_id"] == ident and not d["revoked"]:

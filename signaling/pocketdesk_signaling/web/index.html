@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>PocketDesk</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:#000;color:#eee;font:16px system-ui,sans-serif;overflow:hidden;overscroll-behavior:none}
+  #home{padding:24px;max-width:480px;margin:auto}
+  h1{font-size:24px;margin:0 0 12px}
+  button{font:inherit;padding:12px 16px;border-radius:10px;border:0;background:#3f51b5;color:#fff}
+  button.sec{background:#333}
+  .pc{display:flex;gap:8px;align-items:center;margin:10px 0;padding:12px;background:#1b1b1b;border-radius:10px}
+  .pc span{flex:1}
+  #msg{color:#ffb74d;margin:12px 0;white-space:pre-wrap}
+  #stage{position:fixed;inset:0;background:#000;touch-action:none;user-select:none;display:none}
+  #vid{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;background:#000}
+  #cur{position:absolute;width:14px;height:20px;pointer-events:none;display:none;
+       background:linear-gradient(135deg,#fff 50%,transparent 50%);border:1px solid #000;border-radius:0 0 8px 0;transform:translate(0,0)}
+  #bar{position:absolute;top:0;left:0;right:0;display:flex;gap:6px;padding:6px;overflow-x:auto;background:rgba(0,0,0,.7);z-index:5}
+  #bar button,#keys button{padding:8px 12px;font-size:14px;white-space:nowrap}
+  #bar button.on,#keys button.on{background:#0288d1}
+  #keys{position:absolute;left:0;right:0;bottom:0;display:none;gap:5px;padding:6px;overflow-x:auto;background:rgba(0,0,0,.8);z-index:5}
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.85);z-index:4;text-align:center;padding:24px}
+  #ovmsg{white-space:pre-line}
+  #kb{position:fixed;left:-200px;top:0;width:10px;height:10px;opacity:0}
+  #handle{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:6;background:#0008;border-radius:0 0 10px 10px;padding:0 18px;font-size:12px}
+</style></head><body>
+<div id="home">
+  <h1>PocketDesk</h1>
+  <div id="msg"></div>
+  <div id="list"></div>
+  <p style="color:#aaa;font-size:14px">To add a PC: on the PC open PocketDesk Agent → “Pair a new phone” and scan the QR code with this phone’s camera.</p>
+</div>
+<div id="stage">
+  <div id="view" style="position:absolute;inset:0;transform-origin:0 0;will-change:transform">
+    <video id="vid" autoplay playsinline muted></video><canvas id="cv" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;pointer-events:none"></canvas><div id="cur"></div>
+  </div>
+  <div id="lockmsg" style="display:none;position:absolute;top:56px;left:8px;right:8px;z-index:5;background:#e65100;color:#fff;padding:10px 14px;border-radius:10px;text-align:center;font-size:14px">🔒 The PC is locked. Windows does not allow remote apps to control the lock screen — unlock it at the PC (the screen below is frozen until then).</div>
+  <div id="bar">
+    <button id="bClose" style="background:#c62828">✕</button><span id="stat" style="align-self:center;font-size:13px;color:#bbb">…</span>
+    <button id="bMode">Touch</button><button id="bKb">Keyboard</button><button id="bKeys">Keys</button>
+    <select id="qual" style="padding:8px;border-radius:8px"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+    <button id="bPan">Pan</button><button id="bZo">−</button><button id="bZi">＋</button><button id="bZ1">1×</button>
+    <button id="bFull">Full</button><button id="bLock" class="sec">Lock PC</button>
+  </div>
+  <div id="handle">⌃</div>
+  <div id="keys"></div>
+  <div id="overlay"><div id="ovmsg">Connecting…</div><button id="ovbtn" style="display:none">Try again</button><button id="ovback" class="sec">Back</button></div>
+  <input id="kb" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" type="text">
+</div>
+<script src="/app.js"></script>
+</body></html>

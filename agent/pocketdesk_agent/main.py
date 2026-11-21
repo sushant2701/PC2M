@@ -38,6 +38,22 @@ def set_autostart(enable: bool):
                 pass
 
 
+def pairing_link(cfg, code: str) -> str:
+    """Link/QR content: phone opens the web client and pairs. The code is in the URL fragment (never sent to a server)."""
+    return f"{current_public_url(cfg)}/#c={code}"
+
+
+def current_public_url(cfg) -> str:
+    """Address the phone should use: the tunnel supervisor's live address if present, else config, else the server URL."""
+    try:
+        t = (data_dir() / "public_url.txt").read_text().strip()
+        if t.startswith("https://"):
+            return t.rstrip("/")
+    except OSError:
+        pass
+    return (cfg["public_url"] or cfg["server_url"]).rstrip("/")
+
+
 def selftest() -> str:
     """Checks the pieces that commonly break on a new machine / in the packaged exe."""
     import time
@@ -97,7 +113,9 @@ async def headless(cfg, pair):
     task = asyncio.ensure_future(ag.run())
     if pair:
         await asyncio.sleep(2)
-        print("PAIRING CODE:", await ag.start_pairing(), flush=True)
+        code = await ag.start_pairing()
+        print("PAIRING CODE:", code, flush=True)
+        print("PAIRING LINK:", pairing_link(cfg, code), flush=True)
     try:
         await task
     except asyncio.CancelledError:
@@ -112,6 +130,7 @@ def main(argv=None):
     c.add_argument("--server")
     c.add_argument("--name")
     c.add_argument("--register-key")
+    c.add_argument("--public-url", help="https address the phone uses (e.g. tunnel URL); used in the pairing QR")
     c.add_argument("--max-width", type=int)
     c.add_argument("--fps", type=int)
     r = sub.add_parser("run", help="run without GUI")
@@ -133,7 +152,7 @@ def main(argv=None):
             check_server_url(args.server)
             cfg["server_url"] = args.server.rstrip("/")
             cfg["agent_id"] = cfg["agent_secret"] = ""
-        for k, v in (("name", args.name), ("register_key", args.register_key), ("max_width", args.max_width), ("fps", args.fps)):
+        for k, v in (("name", args.name), ("register_key", args.register_key), ("public_url", (args.public_url or "").rstrip("/")), ("max_width", args.max_width), ("fps", args.fps)):
             if v:
                 cfg[k] = v
         cfg.save()

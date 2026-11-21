@@ -63,5 +63,13 @@ def answer_mac(key: bytes, session_id: str, device_id: str, ts: int, sdp: str) -
     return _mac(key, f"pd1|answer|{session_id}|{device_id}|{ts}|{sdp_fingerprint(sdp)}")
 
 
+def relay_mac(key: bytes, session_id: str, device_id: str, ts: int) -> str:
+    return _mac(key, f"pd1|relay|{session_id}|{device_id}|{ts}")
+
+
+def relay_ok_mac(key: bytes, session_id: str, device_id: str, ts: int) -> str:
+    return _mac(key, f"pd1|relayok|{session_id}|{device_id}|{ts}")
+
+
 def verify(expected_hex: str, given_hex: str) -> bool:
     return hmac.compare_digest(expected_hex, str(given_hex))

@@ -5,6 +5,8 @@ numpy
 mss>=9
 dxcam>=0.3
 pywin32
+pillow
+qrcode
 pytest
 pytest-asyncio
 fastapi

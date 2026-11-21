@@ -14,7 +14,7 @@ class AgentUI:
         self.q = queue.Queue()
         self.root = tk.Tk()
         self.root.title("PocketDesk Agent")
-        self.root.geometry("460x420")
+        self.root.geometry("520x760")
         self.agent = Agent(cfg, lambda k, d=None: self.q.put((k, d)))
         self.loop = asyncio.new_event_loop()
         self.banner = None
@@ -28,12 +28,18 @@ class AgentUI:
         self.status.pack(anchor="w")
         self.server_lbl = ttk.Label(f, text="Server: " + (self.cfg["server_url"] or "(not set)"))
         self.server_lbl.pack(anchor="w", pady=(0, 8))
+        self.pub_lbl = ttk.Label(f, text="Phone address: …")
+        self.pub_lbl.pack(anchor="w")
         ttk.Button(f, text="Set server URL…", command=self.set_server).pack(anchor="w")
         ttk.Separator(f).pack(fill="x", pady=8)
         ttk.Button(f, text="Pair a new phone (generate code)", command=self.pair).pack(anchor="w")
         self.code = tk.Entry(f, font=("Consolas", 13), state="readonly", readonlybackground="white", width=34)
         self.code.pack(anchor="w", pady=4)
-        ttk.Label(f, text="Enter this code in the PocketDesk app within 5 minutes.").pack(anchor="w")
+        ttk.Label(f, text="Scan the QR with your phone camera (valid 5 minutes), or enter the code in the app.").pack(anchor="w")
+        self.qr_lbl = ttk.Label(f)
+        self.qr_lbl.pack(pady=4)
+        self.link_txt = tk.Entry(f, state="readonly", readonlybackground="white", width=60)
+        self.link_txt.pack(anchor="w")
         ttk.Separator(f).pack(fill="x", pady=8)
         ttk.Label(f, text="Paired phones").pack(anchor="w")
         self.lst = tk.Listbox(f, height=5)
@@ -103,6 +109,11 @@ class AgentUI:
 
     def _poll(self):
         try:
+            from .main import current_public_url
+            self.pub_lbl.config(text="Phone address: " + current_public_url(self.cfg))
+        except Exception:
+            pass
+        try:
             while True:
                 k, d = self.q.get_nowait()
                 if k == "status":
@@ -112,6 +123,7 @@ class AgentUI:
                     self.code.delete(0, "end")
                     self.code.insert(0, d)
                     self.code.config(state="readonly")
+                    self._show_qr(d)
                 elif k in ("devices", "paired"):
                     self._refresh_devices()
                     if k == "paired":
@@ -123,6 +135,23 @@ class AgentUI:
         except queue.Empty:
             pass
         self.root.after(150, self._poll)
+
+    def _show_qr(self, code):
+        """QR of the phone link (web client + pairing code in the URL fragment)."""
+        try:
+            import qrcode
+            from PIL import ImageTk
+            from .main import pairing_link
+            link = pairing_link(self.cfg, code)
+            img = qrcode.make(link).resize((260, 260))
+            self._qr_img = ImageTk.PhotoImage(img)
+            self.qr_lbl.config(image=self._qr_img, text="")
+            self.link_txt.config(state="normal")
+            self.link_txt.delete(0, "end")
+            self.link_txt.insert(0, link)
+            self.link_txt.config(state="readonly")
+        except Exception as e:  # noqa
+            self.qr_lbl.config(text=f"QR unavailable: {e}")
 
     def _banner(self, d):
         if d["active"]:

@@ -83,6 +83,13 @@ def test_release_all_on_disconnect():
     assert not r.down_btns and not r.down_keys
 
 
+def test_lock_detection_and_awake_do_not_crash():
+    from pocketdesk_agent.system import is_locked, set_awake
+    assert is_locked() is False  # tests run in an unlocked interactive session
+    set_awake(True)
+    set_awake(False)
+
+
 def test_text_emits_unicode_pairs_and_keytable():
     r = Rec()
     r.handle({"t": "tx", "s": "a😀"})

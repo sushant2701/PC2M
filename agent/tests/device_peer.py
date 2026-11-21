@@ -82,7 +82,50 @@ class DevicePeer:
         return m
 
     def send(self, obj):
-        self.channel.send(json.dumps(obj))
+        if getattr(self, "relay", False):
+            self._relay_send(2, json.dumps(obj).encode())
+        else:
+            self.channel.send(json.dumps(obj))
+
+    # ---- encrypted WebSocket relay mode (same wire format as the browser client) ----
+    async def start_relay(self, mac_override=None, ts=None):
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        sid = secrets.token_hex(16)
+        ts = int(time.time()) if ts is None else ts
+        mac = mac_override or crypto.relay_mac(self.pair_key, sid, self.device_id, ts)
+        await self.ws.send(json.dumps({"type": "relay_start", "session_id": sid, "ts": ts, "mac": mac}))
+        m = await self._recv_type("relay_ok", "error", "agent_offline")
+        if m["type"] != "relay_ok":
+            return m
+        assert crypto.verify(crypto.relay_ok_mac(self.pair_key, sid, self.device_id, int(m["ts"])), m["mac"]), "relay_ok MAC invalid"
+        sidb = bytes.fromhex(sid)
+        self._rtx = AESGCM(crypto.hkdf_sha256(self.pair_key, sidb, b"relay-d2a", 32))
+        self._rrx = AESGCM(crypto.hkdf_sha256(self.pair_key, sidb, b"relay-a2d", 32))
+        self._tx_n = 0
+        self.relay = True
+        self.relay_frames = []
+        self.relay_task = asyncio.ensure_future(self._relay_pump())
+        return m
+
+    def _relay_send(self, typ, payload):
+        ctr = self._tx_n.to_bytes(8, "big")
+        self._tx_n += 1
+        blob = ctr + self._rtx.encrypt(b"\0\0\0\0" + ctr, bytes([typ]) + payload, b"relay-d2a")
+        asyncio.ensure_future(self.ws.send(blob))
+
+    async def _relay_pump(self):
+        last = -1
+        async for raw in self.ws:
+            if isinstance(raw, str):
+                continue
+            n = int.from_bytes(raw[:8], "big")
+            assert n > last, "replayed frame"
+            last = n
+            pt = self._rrx.decrypt(b"\0\0\0\0" + raw[:8], raw[8:], b"relay-a2d")
+            if pt[0] == 1:
+                self.relay_frames.append(pt[1:])
+            elif pt[0] == 2:
+                self.messages.append(json.loads(pt[1:]))
 
     async def close(self):
         if self.pc:
