@@ -1,0 +1,11 @@
+aiortc>=1.9
+httpx>=0.27
+websockets>=12
+numpy
+mss>=9
+dxcam>=0.3
+pywin32
+pytest
+pytest-asyncio
+fastapi
+uvicorn

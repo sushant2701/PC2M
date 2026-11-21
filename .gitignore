@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+*.db
+build/
+dist/
+.dart_tool/
+.pytest_cache/
+agent_data/
+*.jks
+key.properties
+local.properties
+
