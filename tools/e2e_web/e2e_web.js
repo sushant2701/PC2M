@@ -25,9 +25,17 @@ const CHROME = process.env.CHROME || 'C:\\Program Files\\Google\\Chrome\\Applica
   await new Promise(r => setTimeout(r, 1500));
   // 3) zoom in x2.25 and click centre: stays at centre of the (rotated) view
   await p.click('#bRot'); await p.click('#bRot'); await p.click('#bRot'); // back to 0
-  await p.click('#bZi'); await new Promise(r => setTimeout(r, 300));
+  await p.click('#bZi'); await p.click('#bZi'); await p.click('#bZi'); await new Promise(r => setTimeout(r, 2500));
   const z = await p.evaluate(() => document.getElementById('view').style.transform);
   console.log('ZOOM', z);
+  // the PC must now be streaming only the visible region (sharp), placed inside the full-monitor layout
+  const roi = await p.evaluate(() => JSON.stringify({ roi: S.shownRoi, req: S.roiReq && true, zoom: S.zoom, frame: S.relay ? S.rdim : { w: vid.videoWidth, h: vid.videoHeight } }));
+  console.log('ROI', roi);
+  for (let i = 0; i < 3; i++) { await p.mouse.click(550, 250); await new Promise(r => setTimeout(r, 400)); }   // 100 px right of centre while zoomed
+  console.log('CLICKED_ZOOMED');
+  await new Promise(r => setTimeout(r, 800));
+  await p.click('#bZ1'); await new Promise(r => setTimeout(r, 2500));
+  console.log('ROI_AFTER_RESET', await p.evaluate(() => JSON.stringify({ roi: S.shownRoi })));
   await p.click('#bClose');
   await new Promise(r => setTimeout(r, 800));
   console.log('SIGNED_OUT', await p.evaluate(() => document.getElementById('home').style.display));

@@ -48,16 +48,21 @@ class ScreenSource:
         self._stop = threading.Event()
         self._thread = None
         self.captured = 0
+        self.roi, self.roi_gen = None, 0
+        self._raw, self._reframe = None, False
         self.restart_flag = threading.Event()
 
     # settings may change at runtime
     def configure(self, monitor=None, max_width=None, fps=None):
         if max_width:
+            if int(max_width) != self.max_width:
+                self._reframe = True
             self.max_width = int(max_width)
         if fps:
             self.fps = int(fps)
         if monitor is not None and monitor != self.monitor and 0 <= monitor < len(self.monitors):
             self.monitor = monitor
+            self.roi = None
             self.restart_flag.set()
 
     def current_monitor(self):
@@ -87,14 +92,37 @@ class ScreenSource:
         shot = h.grab({"left": mon["left"], "top": mon["top"], "width": mon["width"], "height": mon["height"]})
         return np.frombuffer(shot.bgra, dtype=np.uint8).reshape(shot.height, shot.width, 4)
 
+    # ---- zoom support: send only the region the phone is looking at, cut from the full-resolution screen ----
+    def set_roi(self, roi):
+        """roi = (x, y, w, h) normalized to the monitor, or None for the whole screen."""
+        self.roi = roi
+        if roi:
+            self.roi_gen += 1
+        self._reframe = True
+
+    def _out_size(self, w, h):
+        """Output frame size for a full-resolution screen of w x h. With a region of interest the width carries a small
+        per-request offset (-2 px steps) so the phone can tell exactly which request a received frame belongs to."""
+        if self.roi:
+            cw, ch = max(2, int(self.roi[2] * w)), max(2, int(self.roi[3] * h))
+            tw = min(cw, max(self.max_width, 1100)) - 2 * (self.roi_gen % 8)
+            tw = max(320, tw)
+        else:
+            cw, ch, tw = w, h, min(self.max_width, w)
+        tw -= tw % 2
+        th = int(ch * tw / cw)
+        th -= th % 2
+        return tw, max(2, th)
+
     def _to_frame(self, arr):
         h, w = arr.shape[:2]
+        roi = self.roi
+        tw, th = self._out_size(w, h)
+        if roi:
+            x0, y0 = int(roi[0] * w), int(roi[1] * h)
+            arr = arr[y0:min(h, y0 + max(2, int(roi[3] * h))), x0:min(w, x0 + max(2, int(roi[2] * w)))]
         fmt = "bgr24" if arr.shape[2] == 3 else "bgra"
         vf = av.VideoFrame.from_ndarray(np.ascontiguousarray(arr), format=fmt)
-        tw = min(self.max_width, w)
-        tw -= tw % 2
-        th = int(h * tw / w)
-        th -= th % 2
         return vf.reformat(width=tw, height=th, format="yuv420p")
 
     def start(self):
@@ -116,7 +144,7 @@ class ScreenSource:
                 self.restart_flag.clear()
                 self._close(kind, h)
                 kind, h = self._open()
-                last = None
+                last, self._raw = None, None
             try:
                 arr = self._grab(kind, h)
             except Exception as e:  # display change / lost duplication
@@ -127,7 +155,10 @@ class ScreenSource:
                 self.monitor = min(self.monitor, len(self.monitors) - 1)
                 kind, h = self._open()
                 continue
+            if arr is None and self._reframe and self._raw is not None:
+                arr = self._raw  # screen unchanged but the requested region/size changed: re-cut the last full-resolution capture
             if arr is not None:
+                self._raw, self._reframe = arr, False
                 last = self._to_frame(arr)
                 with self._lock:
                     self._frame = last

@@ -128,7 +128,29 @@ class ControlHandler:
         except (ValueError, KeyError, TypeError) as e:
             self._note_bad(e)
 
+    def _apply_roi(self, m):
+        """Zoom: stream only the visible region at full resolution. Acknowledge with the exact frame size that will
+        identify frames of this request, so the phone can place them correctly."""
+        roi = m.get("roi")
+        if roi is None:
+            self.src.set_roi(None)
+        else:
+            try:
+                x, y, w, h = (float(roi[k]) for k in ("x", "y", "w", "h"))
+            except (TypeError, KeyError, ValueError):
+                raise ValueError("bad roi")
+            if not all(0 <= v <= 1 for v in (x, y)) or not (0.05 <= w <= 1) or not (0.05 <= h <= 1):
+                raise ValueError("roi out of range")
+            w, h = min(w, 1 - x), min(h, 1 - y)
+            self.src.set_roi((x, y, w, h))
+            roi = {"x": x, "y": y, "w": w, "h": h}
+        mon = self.src.current_monitor()
+        tw, th = self.src._out_size(mon["width"], mon["height"])
+        self._send({"t": "roi_ok", "w": tw, "h": th, "roi": roi})
+
     def _apply_cfg(self, m):
+        if "roi" in m:
+            self._apply_roi(m)
         mw, fps = m.get("maxw"), m.get("fps")
         q = m.get("quality")
         if q in QUALITY_PRESETS:
@@ -319,6 +341,8 @@ class RelaySession(ControlHandler):
                 self._queue.put_nowait(blob)
 
     def _apply_cfg(self, m):
+        if "roi" in m:
+            self._apply_roi(m)
         q = m.get("quality")
         if q in RELAY_PRESETS:
             mw, fps, jq = RELAY_PRESETS[q]

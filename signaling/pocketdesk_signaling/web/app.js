@@ -112,13 +112,14 @@ const dims = () => { const W = stage.clientWidth, H = stage.clientHeight; return
 function layout() {
   if (!S) return; const d = dims();
   Object.assign(rotEl.style, { width: d.w + 'px', height: d.h + 'px', marginLeft: -d.w / 2 + 'px', marginTop: -d.h / 2 + 'px', transform: `rotate(${S.rot}deg)` });
-  applyView(S.zoom || 1, S.pan || { x: 0, y: 0 });
+  applyView(S.zoom || 1, S.pan || { x: 0, y: 0 }); if (S.shownRoi) placeVideo(S.shownRoi);
 }
 // screen point -> point inside the (rotated) viewer, and the same for movement deltas
 function sv(px, py) { const r = stage.getBoundingClientRect(), d = dims(), a = px - r.left - r.width / 2, b = py - r.top - r.height / 2;
   switch (S.rot) { case 0: return { x: a + d.w / 2, y: b + d.h / 2 }; case 90: return { x: b + d.w / 2, y: -a + d.h / 2 }; case 180: return { x: -a + d.w / 2, y: -b + d.h / 2 }; default: return { x: -b + d.w / 2, y: a + d.h / 2 }; } }
 function fit() {
-  const d = dims(), vw = vid.videoWidth || (S.rdim && S.rdim.w) || S.remote.w || 16, vh = vid.videoHeight || (S.rdim && S.rdim.h) || S.remote.h || 9;
+  // layout always follows the whole monitor (even when the PC sends only a zoomed region)
+  const d = dims(), vw = S.remote.w || vid.videoWidth || (S.rdim && S.rdim.w) || 16, vh = S.remote.h || vid.videoHeight || (S.rdim && S.rdim.h) || 9;
   const sc = Math.min(d.w / vw, d.h / vh), w = vw * sc, h = vh * sc; return { x: (d.w - w) / 2, y: (d.h - h) / 2, w, h, vw };
 }
 function toNorm(px, py) { const r = fit(), z = S.zoom || 1, p = S.pan || { x: 0, y: 0 }, cx = (px - p.x) / z, cy = (py - p.y) / z; return { x: Math.min(1, Math.max(0, (cx - r.x) / r.w)), y: Math.min(1, Math.max(0, (cy - r.y) / r.h)) }; }
@@ -126,8 +127,46 @@ function drawCursor() { if (!S) return; const r = fit(); cur.style.display = 'bl
 function applyView(z, p) {
   const d = dims(); z = Math.min(6, Math.max(1, z));
   p = { x: Math.min(0, Math.max(d.w - d.w * z, p.x)), y: Math.min(0, Math.max(d.h - d.h * z, p.y)) };
-  S.zoom = z; S.pan = p; view.style.transform = `translate(${p.x}px,${p.y}px) scale(${z})`; drawCursor();
+  S.zoom = z; S.pan = p; view.style.transform = `translate(${p.x}px,${p.y}px) scale(${z})`; drawCursor(); scheduleRoi();
 }
+
+// ---------- zoom clarity: after you stop zooming/panning, the PC sends just the visible region cut from its FULL-resolution screen ----------
+const bgc = $('bg');
+function visibleRegion() {
+  const d = dims(), z = S.zoom || 1, p = S.pan || { x: 0, y: 0 }, F = fit();
+  let x0 = (0 - p.x) / z, y0 = (0 - p.y) / z, x1 = (d.w - p.x) / z, y1 = (d.h - p.y) / z;
+  let a = (x0 - F.x) / F.w, b = (y0 - F.y) / F.h, c = (x1 - F.x) / F.w, e = (y1 - F.y) / F.h;
+  const mx = (c - a) * 0.10, my = (e - b) * 0.10;                // small margin so tiny pans stay sharp while the next frame is on its way
+  a = Math.max(0, a - mx); b = Math.max(0, b - my); c = Math.min(1, c + mx); e = Math.min(1, e + my);
+  return { x: a, y: b, w: Math.max(0.05, c - a), h: Math.max(0.05, e - b) };
+}
+function scheduleRoi() { if (!S) return; clearTimeout(S.roiT); S.roiT = setTimeout(updateRoi, 220); }
+function updateRoi() {
+  const s = S; if (!s || s.closed || s.state !== 'connected') return;
+  const r = (s.zoom || 1) >= 1.15 ? visibleRegion() : null;
+  if (!r || r.w * r.h > 0.8) { if (s.roiReq) { s.roiReq = null; send({ t: 'cfg', roi: null }); } return; }
+  const q = s.roiReq; if (q && Math.abs(q.x - r.x) < 0.01 && Math.abs(q.y - r.y) < 0.01 && Math.abs(q.w - r.w) < 0.01 && Math.abs(q.h - r.h) < 0.01) return;
+  if (!s.roiReq && !s.shownRoi) bgSnap();
+  s.roiReq = r; send({ t: 'cfg', roi: { x: +r.x.toFixed(4), y: +r.y.toFixed(4), w: +r.w.toFixed(4), h: +r.h.toFixed(4) } });
+}
+function bgSnap() {          // keep the last whole-screen picture behind the zoomed region (shown while panning)
+  const el = S.relay ? $('cv') : vid, w = el.videoWidth || el.width, h = el.videoHeight || el.height; if (!w || !h) return;
+  bgc.width = 640; bgc.height = Math.round(640 * h / w); try { bgc.getContext('2d').drawImage(el, 0, 0, bgc.width, bgc.height); } catch {}
+}
+function placeVideo(roi) {   // roi = region (monitor-normalized) the incoming frames show, or null = whole screen
+  if (!S) return; S.shownRoi = roi;
+  for (const el of [vid, $('cv')]) {
+    if (roi) { const F = fit(); Object.assign(el.style, { inset: 'auto', left: (F.x + roi.x * F.w) + 'px', top: (F.y + roi.y * F.h) + 'px', width: (roi.w * F.w) + 'px', height: (roi.h * F.h) + 'px', objectFit: 'fill' }); }
+    else Object.assign(el.style, { inset: '0', left: '0', top: '0', width: '100%', height: '100%', objectFit: 'contain' });
+  }
+  bgc.style.display = roi ? 'block' : 'none';
+}
+function onFrameDims(w, h) { // each zoom request makes frames a unique size; the PC told us which size belongs to which region
+  const s = S; if (!s || !s.dimMap) return; const key = w + 'x' + h;
+  if (key in s.dimMap && s.shownKey !== key) { s.shownKey = key; placeVideo(s.dimMap[key]); }
+}
+const curDims = () => S.relay ? (S.rdim ? [S.rdim.w, S.rdim.h] : [0, 0]) : [vid.videoWidth, vid.videoHeight];
+vid.addEventListener('resize', () => { if (S) onFrameDims(vid.videoWidth, vid.videoHeight); });
 function zoomAt(cx, cy, nz) { const z = S.zoom || 1, p = S.pan || { x: 0, y: 0 }; nz = Math.min(6, Math.max(1, nz)); const k = nz / z; applyView(nz, { x: cx - (cx - p.x) * k, y: cy - (cy - p.y) * k }); }
 const mid = () => { const d = dims(); return { x: d.w / 2, y: d.h / 2 }; };
 
@@ -194,7 +233,8 @@ function retry(s, why) {
 }
 function reconnectNow() { const s = S; if (!s || s.closed) return; s.retrying = false; s.retries = 0; connect(); }
 function teardown(s) {
-  clearInterval(s.flush); clearInterval(s.ping); clearInterval(s.fpsT); clearTimeout(s.fallback); s.relay = false; s.gotFrame = false; s.state = '';
+  clearInterval(s.flush); clearInterval(s.ping); clearInterval(s.fpsT); clearTimeout(s.fallback); clearTimeout(s.roiT); s.relay = false; s.gotFrame = false; s.state = '';
+  s.dimMap = {}; s.shownKey = null; s.roiReq = null; if (s === S && s.shownRoi) placeVideo(null); else s.shownRoi = null;
   $('cv').style.display = 'none'; vid.style.display = '';
   const { rtc, ws, dc } = s; s.rtc = s.ws = s.dc = null;
   try { dc && dc.close(); } catch {} try { rtc && rtc.close(); } catch {} try { ws && ws.close(); } catch {}
@@ -241,7 +281,7 @@ function relayRecv(s, buf) {
     if (pt[0] === 1) {
       const bmp = await createImageBitmap(new Blob([pt.slice(1)], { type: 'image/jpeg' })), cv = $('cv');
       if (cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; }
-      cv.getContext('2d').drawImage(bmp, 0, 0); bmp.close(); s.rdim = { w: cv.width, h: cv.height };
+      cv.getContext('2d').drawImage(bmp, 0, 0); bmp.close(); s.rdim = { w: cv.width, h: cv.height }; onFrameDims(cv.width, cv.height);
       if (!s.gotFrame) { s.gotFrame = true; s.state = 'connected'; s.retries = 0; $('overlay').style.display = 'none'; ls.set('pd_relay_' + s.pc.deviceId, '1'); if (!s.pc.relay) { s.pc.relay = true; savePcs(loadPcs().map(p => p.deviceId === s.pc.deviceId ? { ...p, relay: true } : p)); } drawCursor(); }
       s.frames = (s.frames || 0) + 1; s.fbytes = (s.fbytes || 0) + data.length;
     } else if (pt[0] === 2) onData(s, JSON.parse(new TextDecoder().decode(pt.slice(1))));
@@ -274,6 +314,7 @@ function onOpen(s) {
 function onData(s, m) {
   s.lastRx = performance.now();
   if (m.t === 'state') $('lockmsg').style.display = m.locked ? 'block' : 'none';
+  else if (m.t === 'roi_ok') { s.dimMap = s.dimMap || {}; if (Object.keys(s.dimMap).length > 40) s.dimMap = {}; s.dimMap[m.w + 'x' + m.h] = m.roi; const [cw, ch] = curDims(); onFrameDims(cw, ch); }
   else if (m.t === 'info') { s.remote = { w: m.w, h: m.h }; s.monitors = m.monitors; drawCursor(); }
   else if (m.t === 'cur') { s.norm = { x: m.x, y: m.y }; drawCursor(); }
   else if (m.t === 'stats') { if (!s.relay) { s.fps = m.fps; s.kbps = m.kbps; updStat(); } }
@@ -348,7 +389,7 @@ on('bMore', () => { $('sheet').style.display = 'flex'; });
 on('bSheetClose', () => { $('sheet').style.display = 'none'; });
 $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) $('sheet').style.display = 'none'; });
 function markQ() { for (const b of $('qrow').children) b.classList.toggle('on', S && b.dataset.q === S.quality); }
-for (const b of $('qrow').children) b.onclick = () => { S.quality = b.dataset.q; ls.set('pd_q', S.quality); markQ(); send({ t: 'cfg', quality: S.quality }); };
+for (const b of $('qrow').children) b.onclick = () => { S.quality = b.dataset.q; ls.set('pd_q', S.quality); markQ(); send({ t: 'cfg', quality: S.quality }); S.roiReq = null; scheduleRoi(); };
 on('bFull', () => { $('sheet').style.display = 'none'; (stage.requestFullscreen || stage.webkitRequestFullscreen || (() => {})).call(stage); });
 on('bLock', () => { $('sheet').style.display = 'none'; if (confirm('Lock the PC?\n\nWindows will NOT let this remote app control the lock screen, so you cannot unlock it from here. Only do this if you are at the PC.')) send({ t: 'lock' }); });
 on('bClipPush', async () => { $('sheet').style.display = 'none'; try { const t = await navigator.clipboard.readText(); if (t) { send({ t: 'clip', s: t.slice(0, 50000) }); toast('Clipboard sent to PC'); } } catch { toast('Allow clipboard access first'); } });

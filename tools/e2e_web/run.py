@@ -34,7 +34,7 @@ async def scenario(mode):
     code = await agent.start_pairing()
     saved = cursor()
     proc = await asyncio.create_subprocess_exec("node", "e2e_web.js", url, code, mode, cwd=str(HERE), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    seen_center = seen_rot = False
+    seen_center = seen_rot = seen_zoom = False
     out = []
     async def reader():
         async for line in proc.stdout:
@@ -44,6 +44,7 @@ async def scenario(mode):
         x, y = cursor()
         seen_center |= abs(x - 0.5 * (W - 1)) <= 25 and abs(y - 0.5 * (H - 1)) <= 25
         seen_rot |= abs(x - 0.5 * (W - 1)) <= 25 and abs(y - 0.146 * (H - 1)) <= 25
+        seen_zoom |= abs(x - 0.5333 * (W - 1)) <= 25 and abs(y - 0.5 * (H - 1)) <= 25   # click 100 px right of centre at 3.4x zoom
         try:
             await asyncio.wait_for(proc.wait(), 0.005)
         except asyncio.TimeoutError:
@@ -52,9 +53,15 @@ async def scenario(mode):
     ctypes.windll.user32.SetCursorPos(*saved)
     sess = agent.session
     await agent.stop(); run.cancel(); srv.should_exit = True
-    ok = proc.returncode == 0 and "STAGE_CONNECTED" in "\n".join(out) and seen_center and seen_rot and "SIGNED_OUT none" not in "\n".join(out)
-    print(f"--- {mode}: exit={proc.returncode} center_hit={seen_center} rotated_hit={seen_rot}")
-    print("\n".join(out[-12:]))
+    text = "\n".join(out)
+    roi_line = next((l for l in out if l.startswith("ROI ")), "")
+    zoom_sharp = '"roi":{' in roi_line                       # PC is sending a cropped, full-resolution region
+    reset_ok = any(l.startswith("ROI_AFTER_RESET") and '"roi":null' in l for l in out)
+    ok = proc.returncode == 0 and "STAGE_CONNECTED" in text and seen_center and seen_rot and seen_zoom and zoom_sharp and reset_ok \
+        and "SIGNED_OUT none" not in text
+    print(f"--- {mode}: exit={proc.returncode} center_hit={seen_center} rotated_hit={seen_rot} zoomed_click_hit={seen_zoom} "
+          f"zoom_region_streamed={zoom_sharp} reset_to_full={reset_ok}")
+    print("\n".join(out[-14:]))
     return ok
 
 

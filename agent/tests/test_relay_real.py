@@ -14,6 +14,63 @@ from test_integration_real import server, wait_for, cursor_reaches, cursor, user
 
 
 @pytest.mark.asyncio
+async def test_zoom_region_is_sent_at_full_resolution(server, tmp_path):
+    """Zoom must be crisp: the PC cuts the visible region out of its FULL-resolution screen instead of magnifying a small picture."""
+    cfg = Config(tmp_path / "agent.bin")
+    cfg["server_url"] = server
+    agent = Agent(cfg)
+    run = asyncio.ensure_future(agent.run())
+    phone = DevicePeer(server)
+    try:
+        assert await wait_for(lambda: agent.connected)
+        await phone.pair(await agent.start_pairing())
+        await phone.connect_signaling()
+        assert (await phone.start_relay())["type"] == "relay_ok"
+        assert await wait_for(lambda: len(phone.relay_frames) >= 2, 20)
+        phone.send({"t": "cfg", "quality": "low"})  # low = 960 px wide whole-screen frames
+        await asyncio.sleep(1.5)
+        full = Image.open(io.BytesIO(phone.relay_frames[-1])).convert("RGB")
+        assert full.size[0] <= 960
+        roi = {"x": 0.25, "y": 0.25, "w": 0.25, "h": 0.25}  # a 480x270 px window of a 1920x1080 screen
+        phone.messages.clear()
+        phone.send({"t": "cfg", "roi": roi})
+        assert await wait_for(lambda: any(m.get("t") == "roi_ok" for m in phone.messages), 5)
+        ack = next(m for m in phone.messages if m.get("t") == "roi_ok")
+        assert ack["roi"] == roi
+        phone.relay_frames.clear()
+        # wait for a frame that has exactly the acknowledged size
+        def got():
+            for b in phone.relay_frames:
+                if Image.open(io.BytesIO(b)).size == (ack["w"], ack["h"]):
+                    return True
+            return False
+        assert await wait_for(got, 10), f"no frame of acknowledged size {ack['w']}x{ack['h']}"
+        crop = next(Image.open(io.BytesIO(b)).convert("RGB") for b in phone.relay_frames if Image.open(io.BytesIO(b)).size == (ack["w"], ack["h"]))
+        import mss
+        with mss.MSS() as s:
+            shot = s.grab(s.monitors[1])
+        W, H = shot.size
+        ref = Image.frombytes("RGB", shot.size, shot.rgb).crop((int(0.25 * W), int(0.25 * H), int(0.5 * W), int(0.5 * H))).resize(crop.size)
+        diff = np.abs(np.asarray(ref, dtype=np.float32) - np.asarray(crop, dtype=np.float32)).mean()
+        native = int(0.25 * W)
+        print(f"\n[zoom] whole-screen frame {full.size}; zoomed crop {crop.size} (native region {native}px wide), diff {diff:.1f}")
+        assert crop.size[0] >= min(native, 320) - 16, "zoomed frame is not at native resolution"
+        assert diff < 40
+        # clearing the region returns to whole-screen frames
+        phone.messages.clear()
+        phone.send({"t": "cfg", "roi": None})
+        assert await wait_for(lambda: any(m.get("t") == "roi_ok" and m["roi"] is None for m in phone.messages), 5)
+        # bad regions are rejected
+        phone.send({"t": "cfg", "roi": {"x": 2, "y": 0, "w": 0.5, "h": 0.5}})
+        await asyncio.sleep(0.3)
+        phone.send({"t": "bye"})
+    finally:
+        await phone.close()
+        await agent.stop()
+        run.cancel()
+
+
+@pytest.mark.asyncio
 async def test_closing_app_stops_everything_and_flood_is_blocked(server, tmp_path):
     """When the app is closed the PC must go completely quiet: session ends at once, capture stops, nothing is held down."""
     cfg = Config(tmp_path / "agent.bin")
