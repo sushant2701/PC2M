@@ -1,0 +1,1 @@
+{ "name": "pocketdesk-e2e-web", "private": true, "version": "0.0.0", "dependencies": { "puppeteer-core": "^23.0.0" } }

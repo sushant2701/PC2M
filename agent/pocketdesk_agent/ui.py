@@ -3,9 +3,12 @@ import asyncio
 import queue
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import messagebox, simpledialog, ttk
 
 from .agent import Agent, check_server_url
+
+BG, CARD, ACCENT, OK, BAD, MUT = "#0f172a", "#1e293b", "#4f7cff", "#22c55e", "#ef4444", "#94a3b8"
 
 
 class AgentUI:
@@ -14,45 +17,69 @@ class AgentUI:
         self.q = queue.Queue()
         self.root = tk.Tk()
         self.root.title("PocketDesk Agent")
-        self.root.geometry("520x760")
+        self.root.geometry("560x820")
+        self.root.configure(bg=BG)
         self.agent = Agent(cfg, lambda k, d=None: self.q.put((k, d)))
         self.loop = asyncio.new_event_loop()
         self.banner = None
+        self._link = ""
         self._build()
+
+    # ---------- layout ----------
+    def _card(self, parent, title):
+        f = tk.Frame(parent, bg=CARD, padx=14, pady=12)
+        f.pack(fill="x", padx=14, pady=7)
+        tk.Label(f, text=title, bg=CARD, fg=MUT, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        return f
+
+    def _btn(self, parent, text, cmd, accent=True, **kw):
+        return tk.Button(parent, text=text, command=cmd, bg=ACCENT if accent else "#334155", fg="white", relief="flat",
+                         font=("Segoe UI", 11, "bold"), padx=14, pady=8, cursor="hand2", activebackground="#6b8fff",
+                         activeforeground="white", **kw)
 
     def _build(self):
         r = self.root
-        f = ttk.Frame(r, padding=12)
-        f.pack(fill="both", expand=True)
-        self.status = ttk.Label(f, text="Starting…", font=("Segoe UI", 11, "bold"))
-        self.status.pack(anchor="w")
-        self.server_lbl = ttk.Label(f, text="Server: " + (self.cfg["server_url"] or "(not set)"))
-        self.server_lbl.pack(anchor="w", pady=(0, 8))
-        self.pub_lbl = ttk.Label(f, text="Phone address: …")
-        self.pub_lbl.pack(anchor="w")
-        ttk.Button(f, text="Set server URL…", command=self.set_server).pack(anchor="w")
-        ttk.Separator(f).pack(fill="x", pady=8)
-        ttk.Button(f, text="Pair a new phone (generate code)", command=self.pair).pack(anchor="w")
-        self.code = tk.Entry(f, font=("Consolas", 13), state="readonly", readonlybackground="white", width=34)
-        self.code.pack(anchor="w", pady=4)
-        ttk.Label(f, text="Scan the QR with your phone camera (valid 5 minutes), or enter the code in the app.").pack(anchor="w")
-        self.qr_lbl = ttk.Label(f)
+        head = tk.Frame(r, bg=BG)
+        head.pack(fill="x", padx=16, pady=(14, 4))
+        tk.Label(head, text="🖥  PocketDesk", bg=BG, fg="white", font=("Segoe UI", 18, "bold")).pack(side="left")
+        self.status = tk.Label(head, text="● Starting…", bg=BG, fg=MUT, font=("Segoe UI", 11, "bold"))
+        self.status.pack(side="right")
+
+        c = self._card(r, "REMOTE SESSION")
+        self.sess = tk.Label(c, text="No phone connected", bg=CARD, fg="white", font=("Segoe UI", 13))
+        self.sess.pack(anchor="w", pady=(4, 6))
+        self.disc_btn = self._btn(c, "Disconnect now", self.disconnect, accent=False)
+        self.disc_btn.pack(anchor="w")
+
+        c = self._card(r, "CONNECT YOUR PHONE")
+        self._btn(c, "📱  Pair a new phone", self.pair).pack(anchor="w", pady=(6, 8))
+        self.qr_lbl = tk.Label(c, bg=CARD, fg=MUT, text="Click “Pair a new phone” — a QR code appears here.\nScan it with your phone camera. Valid for 5 minutes.", justify="left")
         self.qr_lbl.pack(pady=4)
-        self.link_txt = tk.Entry(f, state="readonly", readonlybackground="white", width=60)
-        self.link_txt.pack(anchor="w")
-        ttk.Separator(f).pack(fill="x", pady=8)
-        ttk.Label(f, text="Paired phones").pack(anchor="w")
-        self.lst = tk.Listbox(f, height=5)
-        self.lst.pack(fill="x")
-        row = ttk.Frame(f)
-        row.pack(fill="x", pady=4)
-        ttk.Button(row, text="Revoke selected", command=self.revoke).pack(side="left")
-        ttk.Button(row, text="Disconnect session", command=self.disconnect).pack(side="left", padx=6)
+        self.code_lbl = tk.Label(c, text="", bg=CARD, fg="white", font=("Consolas", 13, "bold"))
+        self.code_lbl.pack()
+        row = tk.Frame(c, bg=CARD)
+        row.pack(pady=6)
+        self._btn(row, "Copy link", self.copy_link, accent=False).pack(side="left", padx=4)
+        self._btn(row, "Open on this PC", self.open_link, accent=False).pack(side="left", padx=4)
+
+        c = self._card(r, "PAIRED PHONES")
+        self.lst = tk.Listbox(c, height=4, bg="#0b1220", fg="white", relief="flat", highlightthickness=0, font=("Segoe UI", 10),
+                              selectbackground=ACCENT)
+        self.lst.pack(fill="x", pady=6)
+        self._btn(c, "Revoke selected phone", self.revoke, accent=False).pack(anchor="w")
+
+        c = self._card(r, "ADDRESS")
+        self.pub_lbl = tk.Label(c, text="Phone address: …", bg=CARD, fg="white", wraplength=500, justify="left")
+        self.pub_lbl.pack(anchor="w")
+        self.server_lbl = tk.Label(c, text="Server: " + (self.cfg["server_url"] or "(not set)"), bg=CARD, fg=MUT, wraplength=500, justify="left")
+        self.server_lbl.pack(anchor="w", pady=(2, 6))
+        self._btn(c, "Change server…", self.set_server, accent=False).pack(anchor="w")
+        tk.Label(r, text="While a phone is connected a red banner stays on top of your screen.", bg=BG, fg=MUT).pack(pady=8)
         self._refresh_devices()
         r.protocol("WM_DELETE_WINDOW", self.on_close)
         r.after(150, self._poll)
 
-    # --- actions ---
+    # ---------- actions ----------
     def _submit(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
@@ -79,13 +106,21 @@ class AgentUI:
                 self.q.put(("error", str(fut.exception())))
         self._submit(self.agent.start_pairing()).add_done_callback(done)
 
+    def copy_link(self):
+        if self._link:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self._link)
+
+    def open_link(self):
+        if self._link:
+            webbrowser.open(self._link)
+
     def revoke(self):
         sel = self.lst.curselection()
         if not sel:
             return
-        did = self._ids[sel[0]]
         if messagebox.askyesno("Revoke", "Revoke this phone? It will no longer be able to connect."):
-            self._submit(self.agent.revoke_device(did))
+            self._submit(self.agent.revoke_device(self._ids[sel[0]]))
 
     def disconnect(self):
         self._submit(self.agent.end_session("disconnected on PC"))
@@ -99,13 +134,26 @@ class AgentUI:
                 pass
             self.root.destroy()
 
-    # --- event pump ---
+    # ---------- event pump ----------
     def _refresh_devices(self):
         self.lst.delete(0, "end")
         self._ids = []
         for did, d in self.cfg["devices"].items():
-            self.lst.insert("end", f"{d['name']}  ({did})")
+            self.lst.insert("end", f"  {d['name']}   ({did})")
             self._ids.append(did)
+
+    def _show_qr(self, code):
+        try:
+            import qrcode
+            from PIL import ImageTk
+            from .main import pairing_link
+            self._link = pairing_link(self.cfg, code)
+            img = qrcode.make(self._link).resize((250, 250))
+            self._qr_img = ImageTk.PhotoImage(img)
+            self.qr_lbl.config(image=self._qr_img, text="")
+            self.code_lbl.config(text=code)
+        except Exception as e:  # noqa
+            self.qr_lbl.config(text=f"QR unavailable: {e}")
 
     def _poll(self):
         try:
@@ -117,16 +165,14 @@ class AgentUI:
             while True:
                 k, d = self.q.get_nowait()
                 if k == "status":
-                    self.status.config(text="● Online — waiting for phone" if d == "online" else "○ Offline — reconnecting…")
+                    self.status.config(text="● Online" if d == "online" else "○ Offline — reconnecting…", fg=OK if d == "online" else BAD)
                 elif k == "pairing_code":
-                    self.code.config(state="normal")
-                    self.code.delete(0, "end")
-                    self.code.insert(0, d)
-                    self.code.config(state="readonly")
                     self._show_qr(d)
                 elif k in ("devices", "paired"):
                     self._refresh_devices()
                     if k == "paired":
+                        self.qr_lbl.config(image="", text=f"✅ Paired with “{d['name']}”.")
+                        self.code_lbl.config(text="")
                         messagebox.showinfo("Paired", f"Phone '{d['name']}' paired.")
                 elif k == "session":
                     self._banner(d)
@@ -136,25 +182,9 @@ class AgentUI:
             pass
         self.root.after(150, self._poll)
 
-    def _show_qr(self, code):
-        """QR of the phone link (web client + pairing code in the URL fragment)."""
-        try:
-            import qrcode
-            from PIL import ImageTk
-            from .main import pairing_link
-            link = pairing_link(self.cfg, code)
-            img = qrcode.make(link).resize((260, 260))
-            self._qr_img = ImageTk.PhotoImage(img)
-            self.qr_lbl.config(image=self._qr_img, text="")
-            self.link_txt.config(state="normal")
-            self.link_txt.delete(0, "end")
-            self.link_txt.insert(0, link)
-            self.link_txt.config(state="readonly")
-        except Exception as e:  # noqa
-            self.qr_lbl.config(text=f"QR unavailable: {e}")
-
     def _banner(self, d):
         if d["active"]:
+            self.sess.config(text=f"● {d['device']} is connected", fg=OK)
             if self.banner is None:
                 b = tk.Toplevel(self.root)
                 b.overrideredirect(True)
@@ -168,9 +198,11 @@ class AgentUI:
                 self.banner = b
             self.banner_lbl.config(text=f"● REMOTE SESSION ACTIVE — {d['device']}")
             self.banner.lift()
-        elif self.banner is not None:
-            self.banner.destroy()
-            self.banner = None
+        else:
+            self.sess.config(text="No phone connected", fg="white")
+            if self.banner is not None:
+                self.banner.destroy()
+                self.banner = None
 
     def run(self):
         threading.Thread(target=self._loop_thread, daemon=True).start()

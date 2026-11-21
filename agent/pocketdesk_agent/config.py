@@ -29,7 +29,7 @@ def _unprotect(blob: bytes) -> bytes:
 
 
 DEFAULTS = {"server_url": "", "agent_id": "", "agent_secret": "", "name": "", "devices": {},
-            "register_key": "", "public_url": "", "max_width": 1280, "fps": 24, "autostart": False}
+            "register_key": "", "public_url": "", "web_url": "", "max_width": 1280, "fps": 24, "autostart": False}
 
 
 class Config:

@@ -108,13 +108,12 @@ def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=
                             headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
                                      "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY"})
 
-    @app.get("/")
-    def web_index():
-        return _page("index.html", "text/html")
-
-    @app.get("/app.js")
-    def web_js():
-        return _page("app.js", "application/javascript")
+    static = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "application/javascript"),
+              "/config.js": ("config.js", "application/javascript"), "/sw.js": ("sw.js", "application/javascript"),
+              "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+              "/icon-192.png": ("icon-192.png", "image/png"), "/icon-512.png": ("icon-512.png", "image/png")}
+    for _path, (_file, _mime) in static.items():  # fixed whitelist: no path traversal possible
+        app.add_api_route(_path, (lambda f=_file, m=_mime: _page(f, m)), methods=["GET"], include_in_schema=False)
 
     @app.get("/healthz")
     def healthz():

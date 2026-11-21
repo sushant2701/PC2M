@@ -11,6 +11,15 @@
 | Android build | `flutter build apk --release` | success (≈84 MB, includes all ABIs) |
 | Windows agent package | `tools\build_agent.ps1`, then `PocketDeskAgent.exe selftest` | exe built (62 MB zip); selftest PASS: DXGI capture of real screen, VP8 encoder, DPAPI, aiortc |
 
+## Added after first report (web client, relay, UX)
+| Suite | Result |
+|---|---|
+| Agent (12) incl. REAL relay test (`tests/test_relay_real.py`) | 12 passed (one flaky failure seen once when a human moved the real mouse during the cursor check; rerun green) |
+| Server (11) incl. static web client/PWA routes | 11 passed |
+| **Real browser E2E** `python tools/e2e_web/run.py` (headless Chrome → real server → real agent → real PC cursor) | PASS for both **direct WebRTC** and **encrypted relay**: pairing from QR link, video, click lands at centre, **rotated view maps to the correct PC position**, zoom, sign-out |
+Verified by the user on a real phone (manual): QR scan → pairing → relay session worked ("great job its working").
+Not verified: pinch gesture / rotate on real touch hardware, PWA install, in-page QR scanner (BarcodeDetector), lock-screen message with a real lock, Vercel/Render deployment.
+
 ## Performance (tools/perf.py; agent as separate process; loopback; mostly static desktop)
 | Quality | recv fps | size | agent bitrate | agent CPU* | agent RSS |
 |---|---|---|---|---|---|

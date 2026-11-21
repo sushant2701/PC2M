@@ -104,7 +104,7 @@ class ControlHandler:
 class Session(ControlHandler):
     kind = "webrtc"
 
-    def __init__(self, device_id, device_name, ice_servers, source: ScreenSource, on_end, max_seconds=12 * 3600):
+    def __init__(self, device_id, device_name, ice_servers, source: ScreenSource, on_end, max_seconds=30 * 24 * 3600):
         self.device_id, self.device_name = device_id, device_name
         self._init_control(source)
         self.on_end = on_end
@@ -211,7 +211,7 @@ class RelaySession(ControlHandler):
     A2D, D2A = b"relay-a2d", b"relay-d2a"
 
     def __init__(self, device_id, device_name, source: ScreenSource, pair_key: bytes, session_id: str, send_bytes, on_end,
-                 max_seconds=12 * 3600):
+                 max_seconds=30 * 24 * 3600):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         from .crypto import hkdf_sha256
         self.device_id, self.device_name = device_id, device_name

@@ -1,0 +1,23 @@
+# Render blueprint for the signaling server (WebSocket-capable, unlike Vercel). Dashboard: New + > Blueprint > pick this repo.
+# NOTE: the free plan sleeps when idle and has no persistent disk (pairings are lost). Use a paid instance with a disk
+# (uncomment below) or a small VPS (signaling/deploy/docker-compose.yml) for 24/7 use.
+services:
+  - type: web
+    name: pocketdesk-signaling
+    runtime: docker
+    dockerfilePath: ./signaling/Dockerfile
+    dockerContext: ./signaling
+    healthCheckPath: /healthz
+    envVars:
+      - key: CORS_ORIGINS          # your Vercel site, e.g. https://pocketdesk.vercel.app
+        sync: false
+      - key: REGISTER_KEY          # optional: only agents that know this key can register
+        sync: false
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_SECRET
+        sync: false
+    # disk:
+    #   name: pdata
+    #   mountPath: /data
+    #   sizeGB: 1
