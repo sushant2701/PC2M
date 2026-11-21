@@ -38,9 +38,62 @@ def set_autostart(enable: bool):
                 pass
 
 
+def selftest() -> str:
+    """Checks the pieces that commonly break on a new machine / in the packaged exe."""
+    import time
+    lines = []
+
+    def step(name, fn):
+        try:
+            lines.append(f"PASS {name}: {fn()}")
+        except Exception as e:  # noqa
+            lines.append(f"FAIL {name}: {e!r}")
+
+    def cap():
+        from .capture import ScreenSource, set_dpi_aware
+        set_dpi_aware()
+        s = ScreenSource(max_width=640, fps=10)
+        s.start()
+        t = time.time()
+        while s.latest() is None and time.time() - t < 5:
+            time.sleep(0.1)
+        f = s.latest()
+        s.stop()
+        return f"backend={s.backend} monitors={len(s.monitors)} frame={f.width}x{f.height}"
+
+    def enc():
+        import av
+        import numpy as np
+        c = av.CodecContext.create("libvpx", "w")
+        c.width, c.height, c.pix_fmt = 320, 240, "yuv420p"
+        c.time_base = __import__("fractions").Fraction(1, 30)
+        c.open()
+        f = av.VideoFrame.from_ndarray(np.zeros((240, 320, 3), np.uint8), format="rgb24").reformat(format="yuv420p")
+        f.pts = 0
+        return f"VP8 encoder ok ({len(c.encode(f))} packets)"
+
+    def dp():
+        from . import config
+        assert config._unprotect(config._protect(b"x")) == b"x"
+        return "DPAPI ok"
+
+    def rtc():
+        import aiortc
+        from .crypto import derive_pair_key
+        return f"aiortc {aiortc.__version__}, key len {len(derive_pair_key(b'0123456789'))}"
+    for n, f in (("capture", cap), ("vp8-encoder", enc), ("dpapi", dp), ("webrtc", rtc)):
+        step(n, f)
+    return "\n".join(lines)
+
+
 async def headless(cfg, pair):
     from .agent import Agent
-    ag = Agent(cfg, lambda k, d=None: print(f"[{k}] {d}", flush=True))
+    def emit(k, d=None):
+        try:
+            print(f"[{k}] {d}", flush=True)
+        except OSError:  # stdout closed by parent; logging continues in agent.log
+            pass
+    ag = Agent(cfg, emit)
     task = asyncio.ensure_future(ag.run())
     if pair:
         await asyncio.sleep(2)
@@ -66,6 +119,8 @@ def main(argv=None):
     sub.add_parser("devices")
     rv = sub.add_parser("revoke")
     rv.add_argument("device_id")
+    st = sub.add_parser("selftest", help="verify capture/encoder/crypto/DPAPI work on this machine")
+    st.add_argument("--out", help="write the report to this file")
     a = sub.add_parser("autostart", help="start agent at user logon (opt-in)")
     a.add_argument("state", choices=["on", "off"])
     args = p.parse_args(argv)
@@ -90,6 +145,11 @@ def main(argv=None):
         from .agent import Agent
         asyncio.run(Agent(cfg).revoke_device(args.device_id))
         print("revoked")
+    elif args.cmd == "selftest":
+        rep = selftest()
+        print(rep)
+        if args.out:
+            open(args.out, "w", encoding="utf-8").write(rep)
     elif args.cmd == "autostart":
         set_autostart(args.state == "on")
         print("autostart", args.state)

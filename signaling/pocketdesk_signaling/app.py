@@ -36,7 +36,7 @@ class ClaimReq(BaseModel):
 
 
 def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=None,
-               trust_proxy: bool = False, register_key: str = None) -> FastAPI:
+               trust_proxy: bool = False, register_key: str = None, cors_origins=None) -> FastAPI:
     db = DB(db_path or os.environ.get("POCKETDESK_DB", "pocketdesk.db"))
     stun_urls = stun_urls if stun_urls is not None else [u for u in os.environ.get("STUN_URLS", "stun:stun.l.google.com:19302").split(",") if u]
     turn_urls = turn_urls if turn_urls is not None else [u for u in os.environ.get("TURN_URLS", "").split(",") if u]
@@ -44,6 +44,10 @@ def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=
     register_key = register_key or os.environ.get("REGISTER_KEY")  # optional: restrict who can register agents
     app = FastAPI(title="PocketDesk Signaling", docs_url=None, redoc_url=None)
     app.state.db = db
+    origins = cors_origins if cors_origins is not None else [o for o in os.environ.get("CORS_ORIGINS", "").split(",") if o]
+    if origins:  # only needed for browser-based test clients; the Android app does not use CORS
+        from fastapi.middleware.cors import CORSMiddleware
+        app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"])
     agents_ws: dict[str, WebSocket] = {}
     devices_ws: dict[str, WebSocket] = {}
     app.state.agents_ws, app.state.devices_ws = agents_ws, devices_ws

@@ -68,7 +68,7 @@ class ScreenSource:
         if self.backend_pref in ("auto", "dxgi"):
             try:
                 import dxcam
-                cam = dxcam.create(output_idx=self.monitor, output_color="BGR")
+                cam = dxcam.create(output_idx=self.monitor, output_color="BGR", processor_backend="numpy")
                 if cam is not None and (cam.width, cam.height) == (mon["width"], mon["height"]):
                     self.backend = "dxgi"
                     return ("dxgi", cam)

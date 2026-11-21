@@ -9,12 +9,15 @@ from aiortc.codecs import vpx
 
 from .capture import DesktopTrack, ScreenSource
 from .inputctl import InputController
+from .system import get_clipboard_text, lock_workstation, set_clipboard_text
 
 # Desktop text needs more bitrate than aiortc's webcam-oriented defaults. REMB still adapts downward.
 vpx.DEFAULT_BITRATE = 1_500_000
 vpx.MAX_BITRATE = 4_000_000
 
 log = logging.getLogger("pocketdesk.session")
+sec_log = logging.getLogger("pocketdesk.security")
+MAX_CLIP = 50_000
 IDLE_TIMEOUT = 30.0
 QUALITY_PRESETS = {"low": (960, 12), "medium": (1280, 20), "high": (1920, 30)}
 
@@ -43,6 +46,7 @@ class Session:
         self._tasks = []
         self._last_sent = 0
         self._last_t = time.monotonic()
+        self._last_bytes, self._last_bt = 0, time.monotonic()
 
         @self.pc.on("connectionstatechange")
         async def _state():
@@ -97,6 +101,16 @@ class Session:
                 self._apply_cfg(m)
             elif t == "bye":
                 asyncio.ensure_future(self.close("remote hangup"))
+            elif t == "clip":  # phone -> PC clipboard (text only, user-triggered in the app)
+                s = m.get("s")
+                if not isinstance(s, str) or len(s) > MAX_CLIP:
+                    raise ValueError("bad clipboard")
+                set_clipboard_text(s)
+            elif t == "clipget":  # PC -> phone clipboard (text only, user-triggered in the app)
+                self._send({"t": "clip", "s": (get_clipboard_text() or "")[:MAX_CLIP]})
+            elif t == "lock":  # lock workstation (non-destructive); phone UI asks for confirmation first
+                sec_log.info("remote lock requested by %s", self.device_name)
+                lock_workstation()
             else:
                 self.input.handle(m)
         except (ValueError, KeyError, TypeError) as e:
@@ -131,7 +145,12 @@ class Session:
                     fps = (self.track.sent - self._last_sent) / max(0.001, now - self._last_t)
                     self._last_sent, self._last_t = self.track.sent, now
                     f = self.src.latest()
-                    self._send({"t": "stats", "fps": round(fps, 1), "w": f.width if f else 0, "h": f.height if f else 0})
+                    sent = sum(getattr(v, "bytesSent", 0) for v in (await self.pc.getStats()).values()
+                               if v.type == "outbound-rtp" and v.kind == "video")
+                    kbps = (sent - self._last_bytes) * 8 / 1000 / max(0.001, now - self._last_bt)
+                    self._last_bytes, self._last_bt = sent, now
+                    self._send({"t": "stats", "fps": round(fps, 1), "kbps": round(kbps), "w": f.width if f else 0,
+                                "h": f.height if f else 0, "backend": self.src.backend})
             except Exception as e:  # noqa
                 log.debug("housekeeping: %s", e)
             if time.monotonic() - self.last_rx > IDLE_TIMEOUT and self.channel is not None:

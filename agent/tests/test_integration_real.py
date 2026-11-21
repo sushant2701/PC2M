@@ -134,6 +134,19 @@ async def test_full_remote_session(server, tmp_path):
         phone.send({"t": "ping", "n": 7})
         assert await wait_for(lambda: {"t": "pong", "n": 7} in phone.messages, 5)
 
+        # clipboard both ways (user's clipboard is saved/restored)
+        from pocketdesk_agent.system import get_clipboard_text, set_clipboard_text
+        try:
+            orig_clip = get_clipboard_text()
+        except Exception:
+            orig_clip = ""
+        phone.send({"t": "clip", "s": "héllo 😀 from phone"})
+        assert await wait_for(lambda: get_clipboard_text() == "héllo 😀 from phone", 5)
+        set_clipboard_text("pc side text")
+        phone.send({"t": "clipget"})
+        assert await wait_for(lambda: {"t": "clip", "s": "pc side text"} in phone.messages, 5)
+        set_clipboard_text(orig_clip)
+
         # settings change at runtime
         phone.send({"t": "cfg", "maxw": 640, "fps": 10})
         assert await wait_for(lambda: agent.source.max_width == 640 and agent.source.fps == 10, 5)

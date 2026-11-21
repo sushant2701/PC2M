@@ -1,0 +1,29 @@
+# Single small VPS deployment: Caddy (automatic HTTPS) + signaling + coturn (TURN relay).
+# Copy .env.example to .env and fill in values. Nothing here is deployed by the project itself.
+services:
+  signaling:
+    build: ..
+    restart: unless-stopped
+    environment:
+      TURN_URLS: ${TURN_URLS}          # e.g. turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349?transport=tcp
+      TURN_SECRET: ${TURN_SECRET}      # same value as static-auth-secret in turnserver.conf
+      REGISTER_KEY: ${REGISTER_KEY}    # optional: only agents knowing this key can register
+      STUN_URLS: stun:stun.l.google.com:19302
+    volumes: ["pdata:/data"]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data"]
+    environment: { DOMAIN: "${DOMAIN}" }
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host      # TURN needs real UDP ports
+    command: >
+      -n --realm=${DOMAIN} --use-auth-secret --static-auth-secret=${TURN_SECRET}
+      --listening-port=3478 --min-port=49160 --max-port=49200 --fingerprint
+      --no-cli --no-multicast-peers --denied-peer-ip=10.0.0.0-10.255.255.255
+      --denied-peer-ip=172.16.0.0-172.31.255.255 --denied-peer-ip=192.168.0.0-192.168.255.255
+      --denied-peer-ip=127.0.0.0-127.255.255.255
+volumes: { pdata: {}, caddy_data: {} }
