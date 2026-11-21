@@ -115,6 +115,24 @@ def create_app(db_path: str = None, stun_urls=None, turn_urls=None, turn_secret=
     for _path, (_file, _mime) in static.items():  # fixed whitelist: no path traversal possible
         app.add_api_route(_path, (lambda f=_file, m=_mime: _page(f, m)), methods=["GET"], include_in_schema=False)
 
+    app_dist = os.environ.get("APP_DIST_DIR") or os.path.join(os.path.dirname(__file__), "..", "..", "dist", "app")
+
+    @app.get("/app/version.json")
+    def app_version():  # lets the Android app check for a newer APK
+        from fastapi.responses import FileResponse
+        p = os.path.join(app_dist, "version.json")
+        if not os.path.isfile(p):
+            raise HTTPException(404, "no app release published")
+        return FileResponse(p, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+    @app.get("/app/PocketDesk.apk")
+    def app_apk():
+        from fastapi.responses import FileResponse
+        p = os.path.join(app_dist, "PocketDesk.apk")
+        if not os.path.isfile(p):
+            raise HTTPException(404, "no app release published")
+        return FileResponse(p, media_type="application/vnd.android.package-archive", filename="PocketDesk.apk")
+
     @app.get("/healthz")
     def healthz():
         return {"ok": True}

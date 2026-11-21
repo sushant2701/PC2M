@@ -71,5 +71,10 @@ def relay_ok_mac(key: bytes, session_id: str, device_id: str, ts: int) -> str:
     return _mac(key, f"pd1|relayok|{session_id}|{device_id}|{ts}")
 
 
+def addr_mac(key: bytes, url: str, ts: int) -> str:
+    """Signs a tunnel-address announcement so phones only follow addresses announced by their own PC."""
+    return _mac(key, f"pd1|addr|{url}|{ts}")
+
+
 def verify(expected_hex: str, given_hex: str) -> bool:
     return hmac.compare_digest(expected_hex, str(given_hex))

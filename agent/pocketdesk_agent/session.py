@@ -21,7 +21,7 @@ sec_log = logging.getLogger("pocketdesk.security")
 MAX_CLIP = 50_000
 IDLE_TIMEOUT = 30.0
 QUALITY_PRESETS = {"low": (960, 12), "medium": (1280, 20), "high": (1920, 30)}
-RELAY_PRESETS = {"low": (960, 5, 45), "medium": (1280, 8, 55), "high": (1600, 12, 65)}  # width, fps, jpeg quality
+RELAY_PRESETS = {"low": (960, 6, 45), "medium": (1280, 10, 55), "high": (1600, 15, 65)}  # width, fps, jpeg quality
 
 
 def make_rtc_config(ice_servers):

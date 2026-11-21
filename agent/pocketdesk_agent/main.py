@@ -41,9 +41,10 @@ def set_autostart(enable: bool):
 def pairing_link(cfg, code: str) -> str:
     """Link/QR content: phone opens the web client and pairs. The code is in the URL fragment (never sent to a server)."""
     server = current_public_url(cfg)
+    n = f"&n={cfg['ntfy_topic']}" if cfg["tunnel"] and cfg["ntfy_topic"] else ""  # lets the app follow address changes
     if cfg["web_url"]:  # web client hosted elsewhere (e.g. Vercel): tell it which signaling server to use
-        return f"{cfg['web_url'].rstrip('/')}/#c={code}&s={server}"
-    return f"{server}/#c={code}"
+        return f"{cfg['web_url'].rstrip('/')}/#c={code}&s={server}{n}"
+    return f"{server}/#c={code}{n}"
 
 
 def current_public_url(cfg) -> str:
@@ -133,6 +134,7 @@ def main(argv=None):
     c.add_argument("--server")
     c.add_argument("--name")
     c.add_argument("--register-key")
+    c.add_argument("--tunnel", choices=["on", "off"], help="run the self-restarting public tunnel inside the agent (ssh -> serveo.net)")
     c.add_argument("--web-url", help="where the phone web client is hosted if not on the server (e.g. https://pocketdesk.vercel.app)")
     c.add_argument("--public-url", help="https address the phone uses (e.g. tunnel URL); used in the pairing QR")
     c.add_argument("--max-width", type=int)
@@ -159,6 +161,11 @@ def main(argv=None):
         for k, v in (("name", args.name), ("register_key", args.register_key), ("public_url", (args.public_url or "").rstrip("/")), ("web_url", (args.web_url or "").rstrip("/")),("max_width", args.max_width), ("fps", args.fps)):
             if v:
                 cfg[k] = v
+        if args.tunnel:
+            cfg["tunnel"] = args.tunnel == "on"
+            if cfg["tunnel"]:
+                from .tunnel import ensure_topic
+                ensure_topic(cfg)
         cfg.save()
         print("saved")
     elif args.cmd == "devices":

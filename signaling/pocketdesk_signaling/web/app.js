@@ -28,7 +28,8 @@ function fingerprint(sdp) { const m = /^a=fingerprint:\S+\s+([0-9A-Fa-f:]+)\s*$/
 
 // ---------- storage ----------
 const loadPcs = () => { try { return JSON.parse(ls.get('pd_pcs') || '[]'); } catch { return []; } };
-const savePcs = l => ls.set('pd_pcs', JSON.stringify(l));
+const savePcs = l => { ls.set('pd_pcs', JSON.stringify(l)); try { if (window.PD) PD.postMessage(JSON.stringify(l)); } catch {} }; // PD = Android app bridge (keeps pairing across address changes)
+const syncApp = () => { try { if (window.PD) PD.postMessage(localStorage.getItem('pd_pcs') || '[]'); } catch {} };
 const base = pc => ((pc && pc.server) || window.PD_SERVER || location.origin).replace(/\/+$/, '');
 const wsUrl = pc => base(pc).replace(/^http/, 'ws') + '/ws';
 const deviceName = () => /Android/.test(navigator.userAgent) ? 'Android phone' : /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : 'Phone browser';
@@ -38,10 +39,11 @@ function notice(t) { const m = $('msg'); m.textContent = t || ''; m.style.displa
 // Accepts a full pairing link (…/#c=CODE[&s=SERVER]) or a bare code.
 function parsePairingText(text) {
   text = String(text).trim(); let code = text, server = '';
-  try { const u = new URL(text); const h = new URLSearchParams(u.hash.replace(/^#/, '')); code = h.get('c') || ''; server = h.get('s') || u.origin; } catch {}
-  return { code, server };
+  let topic = '';
+  try { const u = new URL(text); const h = new URLSearchParams(u.hash.replace(/^#/, '')); code = h.get('c') || ''; server = h.get('s') || u.origin; topic = h.get('n') || ''; } catch {}
+  return { code, server, topic };
 }
-async function pairWith(code, server) {
+async function pairWith(code, server, topic) {
   notice('Pairing…');
   try {
     const { lookup, secret } = parseCode(decodeURIComponent(code));
@@ -54,7 +56,7 @@ async function pairWith(code, server) {
     if (!r.ok) throw new Error('Pairing failed (' + r.status + ').');
     const j = await r.json();
     const pcs = loadPcs().filter(p => p.agentId !== j.agent_id);
-    const pc = { server: b, deviceId: j.device_id, token: j.device_token, agentId: j.agent_id, name: j.agent_name, keyHex: hex(key) };
+    const pc = { server: b, deviceId: j.device_id, token: j.device_token, agentId: j.agent_id, name: j.agent_name, keyHex: hex(key), topic: topic || '' };
     pcs.push(pc); savePcs(pcs); notice(''); openPc(pc);
   } catch (e) { notice(e.message || String(e)); }
 }
@@ -62,7 +64,7 @@ function pairFromFragment() {
   const h = new URLSearchParams(location.hash.replace(/^#/, '')), c = h.get('c');
   if (!c) return false;
   history.replaceState(null, '', location.pathname); // keep the secret out of history
-  pairWith(c, h.get('s') || '');
+  pairWith(c, h.get('s') || '', h.get('n') || '');
   return true;
 }
 
@@ -75,7 +77,7 @@ async function startScan() {
     const v = $('scanv'); v.srcObject = scanStream; await v.play(); $('scan').style.display = 'flex';
     const det = new BarcodeDetector({ formats: ['qr_code'] });
     scanTimer = setInterval(async () => {
-      try { const r = await det.detect(v); if (r.length) { const { code, server } = parsePairingText(r[0].rawValue); if (code) { stopScan(); pairWith(code, server); } } } catch {}
+      try { const r = await det.detect(v); if (r.length) { const { code, server, topic } = parsePairingText(r[0].rawValue); if (code) { stopScan(); pairWith(code, server, topic); } } } catch {}
     }, 250);
   } catch (e) { stopScan(); notice('Camera permission is needed to scan. You can also scan the QR with your phone’s Camera app.'); }
 }
@@ -158,7 +160,7 @@ async function connect() {
     s.ws.send(JSON.stringify({ type: 'auth', role: 'device', id: s.pc.deviceId, secret: s.pc.token }));
     const rd = await ready;
     overlay('Connecting to ' + s.pc.name + '…', false);
-    if (FORCE_RELAY || ls.get('pd_relay_' + s.pc.deviceId) === '1') { await startRelay(s); return; }
+    if (FORCE_RELAY || s.pc.relay || ls.get('pd_relay_' + s.pc.deviceId) === '1') { await startRelay(s); return; }
     s.rtc = new RTCPeerConnection({ iceServers: rd.ice_servers });
     s.dc = s.rtc.createDataChannel('control', { ordered: true });
     s.dc.onopen = () => onOpen(s); s.dc.onmessage = e => onData(s, JSON.parse(e.data));
@@ -181,13 +183,13 @@ async function connect() {
     if (ans.session_id !== s.sid || !ctEq(expect, String(ans.mac))) { s.closed = true; teardown(s); overlay('Security check failed: the PC could not be verified. Remove it and pair again.', 'err'); return; }
     await s.rtc.setRemoteDescription({ type: 'answer', sdp: ans.sdp });
     // No direct/TURN path within 12 s (typical on mobile data / office networks): use the encrypted relay.
-    s.fallback = setTimeout(() => { if (S === s && s.state !== 'connected' && !s.closed) startRelay(s); }, 12000);
+    s.fallback = setTimeout(() => { if (S === s && s.state !== 'connected' && !s.closed) startRelay(s); }, 6000);
   } catch (e) { retry(s, e.message); }
 }
 function fatal(s, m) { if (m.fatal) { s.closed = true; teardown(s); overlay(m.error, 'err'); } else retry(s, m.error); }
 function retry(s, why) {
   if (s !== S || s.closed || s.retrying) return;
-  s.retries++; s.retrying = true; teardown(s); overlay(`Reconnecting… (attempt ${s.retries})\n${why}`, true); // never gives up until you sign out
+  s.retries++; s.retrying = true; teardown(s); try { if (window.PDS) PDS.postMessage('retry:' + s.retries); } catch {} overlay(`Reconnecting… (attempt ${s.retries})\n${why}`, true); // never gives up until you sign out
   setTimeout(() => { s.retrying = false; if (s === S && !s.closed) connect(); }, Math.min(6000, 700 * s.retries));
 }
 function reconnectNow() { const s = S; if (!s || s.closed) return; s.retrying = false; s.retries = 0; connect(); }
@@ -240,7 +242,7 @@ function relayRecv(s, buf) {
       const bmp = await createImageBitmap(new Blob([pt.slice(1)], { type: 'image/jpeg' })), cv = $('cv');
       if (cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; }
       cv.getContext('2d').drawImage(bmp, 0, 0); bmp.close(); s.rdim = { w: cv.width, h: cv.height };
-      if (!s.gotFrame) { s.gotFrame = true; s.state = 'connected'; s.retries = 0; $('overlay').style.display = 'none'; ls.set('pd_relay_' + s.pc.deviceId, '1'); drawCursor(); }
+      if (!s.gotFrame) { s.gotFrame = true; s.state = 'connected'; s.retries = 0; $('overlay').style.display = 'none'; ls.set('pd_relay_' + s.pc.deviceId, '1'); if (!s.pc.relay) { s.pc.relay = true; savePcs(loadPcs().map(p => p.deviceId === s.pc.deviceId ? { ...p, relay: true } : p)); } drawCursor(); }
       s.frames = (s.frames || 0) + 1; s.fbytes = (s.fbytes || 0) + data.length;
     } else if (pt[0] === 2) onData(s, JSON.parse(new TextDecoder().decode(pt.slice(1))));
   }).catch(() => {});
@@ -375,6 +377,7 @@ on('bKeys', () => { const k = $('keys'), open = k.style.display === 'flex'; k.st
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(() => {});
+syncApp();
 renderHome();
 if (!pairFromFragment()) {            // resume where you left off until you tap "Sign out"
   const auto = ls.get('pd_auto'), pc = loadPcs().find(p => p.deviceId === auto);

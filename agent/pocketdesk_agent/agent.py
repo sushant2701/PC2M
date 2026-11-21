@@ -85,6 +85,10 @@ class Agent:
     async def run(self):
         set_dpi_aware()
         set_awake(False)  # no sleep while the agent is running (display may still turn off)
+        if self.cfg["tunnel"]:
+            from .tunnel import Tunnel
+            self.tunnel = Tunnel(self.cfg)
+            asyncio.ensure_future(self.tunnel.run())
         backoff = 1
         while not self._stop.is_set():
             try:
@@ -119,6 +123,9 @@ class Agent:
 
     async def stop(self):
         self._stop.set()
+        t = getattr(self, "tunnel", None)
+        if t:
+            await t.stop()
         await self.end_session("agent stopping")
         if self.ws:
             await self.ws.close()
@@ -156,6 +163,9 @@ class Agent:
                 crypto.verify(crypto.claim_proof(p["key"], p["lookup"], name), str(m.get("proof"))):
             self.cfg.add_device(did, name, p["key"])
             self._pending = None
+            t = getattr(self, "tunnel", None)
+            if t and t.url:  # give the new phone a signed address announcement right away
+                asyncio.ensure_future(t._announce())
             sec_log.info("paired device %s (%s)", did, name)
             self.emit("paired", {"id": did, "name": name})
             self.emit("devices", self.cfg["devices"])
