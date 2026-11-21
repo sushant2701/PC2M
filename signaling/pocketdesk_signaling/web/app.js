@@ -87,7 +87,7 @@ $('bScan').onclick = startScan; $('scanx').onclick = stopScan;
 // ---------- home ----------
 async function renderHome() {
   const l = $('list'); l.innerHTML = ''; const pcs = loadPcs();
-  $('steps').style.display = pcs.length ? 'none' : 'block';
+  $('steps').style.display = pcs.length ? 'none' : 'block'; $('mypcs').style.display = pcs.length ? '' : 'none';
   for (const pc of pcs) {
     const d = document.createElement('div'); d.className = 'pc';
     d.innerHTML = '<span class="ic">🖥</span><div class="nm"><b></b><span class="st"><i class="dot"></i><span>Checking…</span></span></div>';

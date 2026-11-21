@@ -24,7 +24,15 @@ class App extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'PocketDesk',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: const Color(0xFF4F7CFF), brightness: Brightness.dark, useMaterial3: true),
+        theme: ThemeData(
+          colorSchemeSeed: const Color(0xFF3D7A5A),
+          brightness: Brightness.light,
+          useMaterial3: true,
+          scaffoldBackgroundColor: const Color(0xFFF5F1EA),
+          appBarTheme: const AppBarTheme(backgroundColor: Color(0xFFF5F1EA), foregroundColor: Color(0xFF2B2F2A), elevation: 0),
+          filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)))),
+          outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)))),
+        ),
         home: const Boot(),
       );
 }
@@ -102,13 +110,29 @@ class Welcome extends StatelessWidget {
       body: SafeArea(
         child: ListView(padding: const EdgeInsets.all(24), children: [
           const SizedBox(height: 24),
-          const Row(children: [Text('🖥', style: TextStyle(fontSize: 40)), SizedBox(width: 12), Text('PocketDesk', style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold))]),
+          Row(children: [
+            Container(
+              width: 60, height: 60,
+              decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFF4F9170), Color(0xFF2F6247)]), borderRadius: BorderRadius.circular(19), boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 14, offset: Offset(0, 6))]),
+              alignment: Alignment.center,
+              child: const Text('🖥', style: TextStyle(fontSize: 30)),
+            ),
+            const SizedBox(width: 14),
+            const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('PocketDesk', style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: Color(0xFF2B2F2A), height: 1.1)),
+              Text('Your PC, in your pocket', style: TextStyle(color: Color(0xFF6B7468))),
+            ]),
+          ]),
           const SizedBox(height: 28),
-          const Text('1. On your PC open PocketDesk Agent and click “Pair a new phone”.\n2. Tap the button below and scan the QR code.\n3. Your PC desktop appears. It stays connected until you sign out.', style: TextStyle(fontSize: 16, height: 1.5)),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(22), border: Border.all(color: const Color(0xFFE3DCCD))),
+            child: const Text('1. On your PC open PocketDesk Agent and click “Pair a new phone”.\n\n2. Tap the button below and scan the QR code.\n\n3. Your desktop appears. It stays connected until you sign out.', style: TextStyle(fontSize: 16, height: 1.45, color: Color(0xFF2B2F2A))),
+          ),
           const SizedBox(height: 28),
           SizedBox(height: 64, child: FilledButton.icon(onPressed: () => _scan(context), icon: const Icon(Icons.qr_code_scanner, size: 28), label: const Text('Scan QR code', style: TextStyle(fontSize: 18)))),
           const SizedBox(height: 28),
-          const Text('Or type the server address:', style: TextStyle(color: Colors.white70)),
+          const Text('Or type the server address:', style: TextStyle(color: Color(0xFF6B7468))),
           const SizedBox(height: 8),
           TextField(controller: ctl, keyboardType: TextInputType.url, decoration: const InputDecoration(border: OutlineInputBorder(), hintText: 'https://your-server.example.com')),
           const SizedBox(height: 12),
@@ -168,9 +192,10 @@ class _ViewerState extends State<Viewer> {
     origin = Uri.parse(widget.startLink).origin;
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(statusBarIconBrightness: Brightness.dark, systemNavigationBarIconBrightness: Brightness.dark));
     ctl = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFF0F172A))
+      ..setBackgroundColor(const Color(0xFFF5F1EA))
       ..addJavaScriptChannel('PD', onMessageReceived: (m) async {
         // the web client reports its paired PCs (token + key + announcement topic): keep them natively
         try {
@@ -321,7 +346,7 @@ class _ViewerState extends State<Viewer> {
         if (!didPop) _menu();
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: const Color(0xFFF5F1EA),
         body: loadError != null
             ? Center(
                 child: Padding(
@@ -331,7 +356,7 @@ class _ViewerState extends State<Viewer> {
                     const SizedBox(height: 20),
                     const Text('Looking for your PC…\nThe app is checking whether its address changed and will reconnect by itself.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16)),
                     const SizedBox(height: 8),
-                    Text(loadError!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                    Text(loadError!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFF6B7468), fontSize: 12)),
                     const SizedBox(height: 20),
                     FilledButton(onPressed: _checkAddress, child: const Text('Try now')),
                     const SizedBox(height: 10),

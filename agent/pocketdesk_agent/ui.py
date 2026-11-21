@@ -8,7 +8,8 @@ from tkinter import messagebox, simpledialog, ttk
 
 from .agent import Agent, check_server_url
 
-BG, CARD, ACCENT, OK, BAD, MUT = "#0f172a", "#1e293b", "#4f7cff", "#22c55e", "#ef4444", "#94a3b8"
+BG, CARD, ACCENT, OK, BAD, MUT = "#f5f1ea", "#ffffff", "#3d7a5a", "#3d9a5f", "#c4533a", "#6b7468"
+TEXT, SAND = "#2b2f2a", "#ece6db"
 
 
 class AgentUI:
@@ -33,20 +34,20 @@ class AgentUI:
         return f
 
     def _btn(self, parent, text, cmd, accent=True, **kw):
-        return tk.Button(parent, text=text, command=cmd, bg=ACCENT if accent else "#334155", fg="white", relief="flat",
-                         font=("Segoe UI", 11, "bold"), padx=14, pady=8, cursor="hand2", activebackground="#6b8fff",
-                         activeforeground="white", **kw)
+        return tk.Button(parent, text=text, command=cmd, bg=ACCENT if accent else SAND, fg="white" if accent else TEXT,
+                         relief="flat", font=("Segoe UI", 11, "bold"), padx=16, pady=9, cursor="hand2",
+                         activebackground="#2f6247" if accent else "#e0d8c9", activeforeground="white" if accent else TEXT, **kw)
 
     def _build(self):
         r = self.root
         head = tk.Frame(r, bg=BG)
         head.pack(fill="x", padx=16, pady=(14, 4))
-        tk.Label(head, text="🖥  PocketDesk", bg=BG, fg="white", font=("Segoe UI", 18, "bold")).pack(side="left")
+        tk.Label(head, text="🖥  PocketDesk", bg=BG, fg=TEXT, font=("Segoe UI", 18, "bold")).pack(side="left")
         self.status = tk.Label(head, text="● Starting…", bg=BG, fg=MUT, font=("Segoe UI", 11, "bold"))
         self.status.pack(side="right")
 
         c = self._card(r, "REMOTE SESSION")
-        self.sess = tk.Label(c, text="No phone connected", bg=CARD, fg="white", font=("Segoe UI", 13))
+        self.sess = tk.Label(c, text="No phone connected", bg=CARD, fg=TEXT, font=("Segoe UI", 13))
         self.sess.pack(anchor="w", pady=(4, 6))
         self.disc_btn = self._btn(c, "Disconnect now", self.disconnect, accent=False)
         self.disc_btn.pack(anchor="w")
@@ -55,7 +56,7 @@ class AgentUI:
         self._btn(c, "📱  Pair a new phone", self.pair).pack(anchor="w", pady=(6, 8))
         self.qr_lbl = tk.Label(c, bg=CARD, fg=MUT, text="Click “Pair a new phone” — a QR code appears here.\nScan it with your phone camera. Valid for 5 minutes.", justify="left")
         self.qr_lbl.pack(pady=4)
-        self.code_lbl = tk.Label(c, text="", bg=CARD, fg="white", font=("Consolas", 13, "bold"))
+        self.code_lbl = tk.Label(c, text="", bg=CARD, fg=TEXT, font=("Consolas", 13, "bold"))
         self.code_lbl.pack()
         row = tk.Frame(c, bg=CARD)
         row.pack(pady=6)
@@ -63,13 +64,13 @@ class AgentUI:
         self._btn(row, "Open on this PC", self.open_link, accent=False).pack(side="left", padx=4)
 
         c = self._card(r, "PAIRED PHONES")
-        self.lst = tk.Listbox(c, height=4, bg="#0b1220", fg="white", relief="flat", highlightthickness=0, font=("Segoe UI", 10),
-                              selectbackground=ACCENT)
+        self.lst = tk.Listbox(c, height=4, bg="#faf8f3", fg=TEXT, relief="flat", highlightthickness=1, highlightbackground="#e3dccd",
+                              font=("Segoe UI", 10), selectbackground="#e3efe8", selectforeground=TEXT)
         self.lst.pack(fill="x", pady=6)
         self._btn(c, "Revoke selected phone", self.revoke, accent=False).pack(anchor="w")
 
         c = self._card(r, "ADDRESS")
-        self.pub_lbl = tk.Label(c, text="Phone address: …", bg=CARD, fg="white", wraplength=500, justify="left")
+        self.pub_lbl = tk.Label(c, text="Phone address: …", bg=CARD, fg=TEXT, wraplength=500, justify="left")
         self.pub_lbl.pack(anchor="w")
         self.server_lbl = tk.Label(c, text="Server: " + (self.cfg["server_url"] or "(not set)"), bg=CARD, fg=MUT, wraplength=500, justify="left")
         self.server_lbl.pack(anchor="w", pady=(2, 6))
@@ -199,7 +200,7 @@ class AgentUI:
             self.banner_lbl.config(text=f"● REMOTE SESSION ACTIVE — {d['device']}")
             self.banner.lift()
         else:
-            self.sess.config(text="No phone connected", fg="white")
+            self.sess.config(text="No phone connected", fg=TEXT)
             if self.banner is not None:
                 self.banner.destroy()
                 self.banner = None
