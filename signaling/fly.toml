@@ -1,0 +1,35 @@
+# Fly.io config for the PocketDesk signaling server (WebSockets work on Fly; run exactly ONE machine: state is in memory).
+# Change `app` to a globally unique name.
+app = "pocketdesk-sushant"
+primary_region = "bom"        # Mumbai
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8080"
+  TRUST_PROXY = "1"
+  POCKETDESK_DB = "/data/pocketdesk.db"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"   # keep it running: agents stay connected
+  auto_start_machines = true
+  min_machines_running = 1
+  [http_service.checks]
+    [http_service.checks.health]
+      grace_period = "10s"
+      interval = "30s"
+      method = "GET"
+      path = "/healthz"
+      timeout = "5s"
+
+[mounts]
+  source = "pdata"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
