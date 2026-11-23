@@ -132,11 +132,43 @@ class Welcome extends StatelessWidget {
           const SizedBox(height: 28),
           SizedBox(height: 64, child: FilledButton.icon(onPressed: () => _scan(context), icon: const Icon(Icons.qr_code_scanner, size: 28), label: const Text('Scan QR code', style: TextStyle(fontSize: 18)))),
           const SizedBox(height: 28),
-          const Text('Or type the server address:', style: TextStyle(color: Color(0xFF6B7468))),
+          const Text('No camera? On the PC click “Copy link”, then paste the link here:', style: TextStyle(color: Color(0xFF6B7468))),
           const SizedBox(height: 8),
-          TextField(controller: ctl, keyboardType: TextInputType.url, decoration: const InputDecoration(border: OutlineInputBorder(), hintText: 'https://your-server.example.com')),
+          TextField(
+            controller: ctl,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              hintText: 'https://…#c=…',
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.paste),
+                tooltip: 'Paste',
+                onPressed: () async {
+                  final d = await Clipboard.getData('text/plain');
+                  if (d?.text != null) ctl.text = d!.text!.trim();
+                },
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
-          SizedBox(height: 52, child: OutlinedButton(onPressed: () async { final l = normalizeLink(ctl.text); if (l != null) await onLink(l); }, child: const Text('Open'))),
+          SizedBox(
+            height: 52,
+            child: OutlinedButton(
+              onPressed: () async {
+                final l = normalizeLink(ctl.text);
+                if (l == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paste the full link from the PC (it starts with https://).')));
+                  return;
+                }
+                if (l.contains('#c=')) {
+                  final p = await SharedPreferences.getInstance();
+                  await p.setString('pending_link', l); // keep the one-time pairing code
+                }
+                await onLink(l);
+              },
+              child: const Text('Open this link'),
+            ),
+          ),
         ]),
       ),
     );
@@ -151,20 +183,55 @@ class Scanner extends StatefulWidget {
 
 class _ScannerState extends State<Scanner> {
   bool done = false;
+  final controller = MobileScannerController(formats: const [BarcodeFormat.qrCode], detectionSpeed: DetectionSpeed.noDuplicates);
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Scan the QR on your PC')),
-        body: MobileScanner(onDetect: (cap) {
-          if (done) return;
-          for (final b in cap.barcodes) {
-            final v = b.rawValue;
-            if (v != null && v.startsWith('http')) {
-              done = true;
-              Navigator.of(context).pop(v);
-              return;
+        body: MobileScanner(
+          controller: controller,
+          onDetect: (cap) {
+            if (done) return;
+            for (final b in cap.barcodes) {
+              final v = b.rawValue;
+              if (v != null && v.startsWith('http')) {
+                done = true;
+                Navigator.of(context).pop(v);
+                return;
+              }
             }
-          }
-        }),
+          },
+          // If the camera cannot start, say exactly why and offer the no-camera route instead of a black screen.
+          errorBuilder: (context, error) {
+            final denied = error.errorCode == MobileScannerErrorCode.permissionDenied;
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.no_photography, size: 56, color: Color(0xFFC4533A)),
+                  const SizedBox(height: 16),
+                  Text(
+                    denied
+                        ? 'Camera permission is off.\nOpen Android Settings → Apps → PocketDesk → Permissions → Camera → Allow, then come back.'
+                        : 'The camera could not start.\n(${error.errorCode.name}${error.errorDetails?.message != null ? ': ${error.errorDetails!.message}' : ''})',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 16, height: 1.4),
+                  ),
+                  const SizedBox(height: 22),
+                  FilledButton(onPressed: () => controller.start(), child: const Text('Try the camera again')),
+                  const SizedBox(height: 10),
+                  OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Use the link instead')),
+                ]),
+              ),
+            );
+          },
+        ),
       );
 }
 

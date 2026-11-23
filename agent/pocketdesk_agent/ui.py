@@ -1,6 +1,7 @@
 """Tk control window + always-visible remote-session indicator."""
 import asyncio
 import queue
+import time
 import threading
 import tkinter as tk
 import webbrowser
@@ -24,6 +25,7 @@ class AgentUI:
         self.loop = asyncio.new_event_loop()
         self.banner = None
         self._link = ""
+        self._code, self._code_t = None, 0.0
         self._build()
 
     # ---------- layout ----------
@@ -143,11 +145,14 @@ class AgentUI:
             self.lst.insert("end", f"  {d['name']}   ({did})")
             self._ids.append(did)
 
-    def _show_qr(self, code):
+    def _show_qr(self, code, keep_clock=False):
         try:
             import qrcode
             from PIL import ImageTk
             from .main import pairing_link
+            self._code = code
+            if not keep_clock:
+                self._code_t = time.time()
             self._link = pairing_link(self.cfg, code)
             img = qrcode.make(self._link).resize((250, 250))
             self._qr_img = ImageTk.PhotoImage(img)
@@ -158,8 +163,17 @@ class AgentUI:
 
     def _poll(self):
         try:
-            from .main import current_public_url
-            self.pub_lbl.config(text="Phone address: " + current_public_url(self.cfg))
+            from .main import current_public_url, pairing_link
+            pu = current_public_url(self.cfg)
+            self.pub_lbl.config(text="Phone address: " + ("starting… (a few seconds)" if pu.endswith(".invalid") else pu))
+            if self._code:  # keep the QR in step with the tunnel address; retire it when the code expires
+                if time.time() - self._code_t > 295:
+                    self._code = None
+                    self._link = ""
+                    self.qr_lbl.config(image="", text="That code expired.\nClick “Pair a new phone” for a fresh QR.")
+                    self.code_lbl.config(text="")
+                elif pairing_link(self.cfg, self._code) != self._link:
+                    self._show_qr(self._code, keep_clock=True)
         except Exception:
             pass
         try:
@@ -172,6 +186,7 @@ class AgentUI:
                 elif k in ("devices", "paired"):
                     self._refresh_devices()
                     if k == "paired":
+                        self._code = None
                         self.qr_lbl.config(image="", text=f"✅ Paired with “{d['name']}”.")
                         self.code_lbl.config(text="")
                         messagebox.showinfo("Paired", f"Phone '{d['name']}' paired.")

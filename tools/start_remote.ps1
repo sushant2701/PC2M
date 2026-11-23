@@ -5,10 +5,8 @@ if (-not (Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction Silent
   Start-Process python -ArgumentList '-m', 'pocketdesk_signaling.app' -WorkingDirectory "$root\signaling" -WindowStyle Hidden
   Start-Sleep 3
 }
-if (-not (Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | ? { $_.CommandLine -match 'tunnel_supervisor' })) {
-  Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "$PSScriptRoot\tunnel_supervisor.ps1" -WindowStyle Hidden
-}
-Push-Location "$root\agent"; python -m pocketdesk_agent config --server http://127.0.0.1:8080 | Out-Null; Pop-Location
+# The agent now runs and health-checks its own tunnel (config --tunnel on), so the old tunnel_supervisor.ps1 is NOT started.
+Push-Location "$root\agent"; python -m pocketdesk_agent config --tunnel on | Out-Null; Pop-Location
 if (-not (Get-CimInstance Win32_Process -Filter "Name='python.exe'" | ? { $_.CommandLine -match '-m pocketdesk_agent' })) {
   Start-Process python -ArgumentList '-m', 'pocketdesk_agent' -WorkingDirectory "$root\agent"
 }

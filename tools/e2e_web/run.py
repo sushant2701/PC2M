@@ -67,6 +67,9 @@ async def scenario(mode):
 
 async def main():
     res = [await scenario("direct"), await scenario("relay")]
+    os.environ["MANUAL"] = "1"      # same flow, but pairing by pasting the link (no camera)
+    res.append(await scenario("direct"))
+    os.environ.pop("MANUAL")
     print("RESULT", res)
     return 0 if all(res) else 1
 

@@ -55,6 +55,8 @@ def current_public_url(cfg) -> str:
             return t.rstrip("/")
     except OSError:
         pass
+    if cfg["tunnel"]:  # tunnel enabled but not up right now: never hand out a localhost link
+        return "https://waiting-for-tunnel.invalid"
     return (cfg["public_url"] or cfg["server_url"]).rstrip("/")
 
 

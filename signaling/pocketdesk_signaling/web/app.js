@@ -39,7 +39,7 @@ function notice(t) { const m = $('msg'); m.textContent = t || ''; m.style.displa
 // Accepts a full pairing link (…/#c=CODE[&s=SERVER]) or a bare code.
 function parsePairingText(text) {
   text = String(text).trim(); let code = text, server = '';
-  let topic = '';
+  let topic = ''; if (!/^https?:/i.test(text)) { try { parseCode(text); } catch { return { code: '', server: '', topic: '' }; } return { code: text, server: '', topic: '' }; }
   try { const u = new URL(text); const h = new URLSearchParams(u.hash.replace(/^#/, '')); code = h.get('c') || ''; server = h.get('s') || u.origin; topic = h.get('n') || ''; } catch {}
   return { code, server, topic };
 }
@@ -83,6 +83,11 @@ async function startScan() {
 }
 function stopScan() { clearInterval(scanTimer); if (scanStream) scanStream.getTracks().forEach(t => t.stop()); scanStream = null; $('scan').style.display = 'none'; }
 $('bScan').onclick = startScan; $('scanx').onclick = stopScan;
+$('bManual').onclick = () => {   // pairing without a camera: paste the whole link, or just the code (then this server is used)
+  const { code, server, topic } = parsePairingText($('manual').value);
+  if (!code) { notice('Paste the pairing link or the code shown on the PC.'); return; }
+  pairWith(code, server, topic);
+};
 
 // ---------- home ----------
 async function renderHome() {

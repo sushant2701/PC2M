@@ -7,7 +7,12 @@ const CHROME = process.env.CHROME || 'C:\\Program Files\\Google\\Chrome\\Applica
   const p = await b.newPage();
   await p.setViewport({ width: 900, height: 500, hasTouch: false });
   p.on('pageerror', e => console.log('[pageerror]', e.message));
-  await p.goto(`${url}/${mode === 'relay' ? '?relay=1' : ''}#c=${code}`);
+  if (process.env.MANUAL) {   // no-camera path: paste the pairing link into the box
+    await p.goto(`${url}/${mode === 'relay' ? '?relay=1' : ''}`);
+    await p.evaluate(() => { document.querySelector('details.manual').open = true; });
+    await p.type('#manual', `${url}/#c=${code}`);
+    await p.click('#bManual');
+  } else await p.goto(`${url}/${mode === 'relay' ? '?relay=1' : ''}#c=${code}`);
   await p.waitForFunction(() => document.getElementById('stage').style.display === 'block' && document.getElementById('overlay').style.display === 'none', { timeout: 60000 });
   await new Promise(r => setTimeout(r, 2500));
   console.log('PILL', await p.$eval('#pill', e => e.textContent));
